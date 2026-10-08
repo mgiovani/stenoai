@@ -158,6 +158,7 @@ test('note-ready carries the action-item count as a detail', () => {
 test('note-ready ignores a missing or invalid action-item count', () => {
   for (const actionItemCount of [undefined, 0, -2, 1.5, '3', NaN, null]) {
     const o = buildNoteReadyNotificationOptions({ title: 'Standup', actionItemCount });
+    assert.strictEqual(o.title, 'Note ready');
     assert.strictEqual(o.detail, undefined);
   }
 });
