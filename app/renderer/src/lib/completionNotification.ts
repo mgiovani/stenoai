@@ -56,6 +56,26 @@ export function meetingAlreadyHasNotes(
   return meetingData.session_info?.notes_generated !== false;
 }
 
+// ponytail: English-only. Non-English "nothing" bullets still count; the real
+// fix is telling the prompt in src/summarizer.py to leave the section empty.
+const NO_ACTION_ITEMS =
+  /^(?:[-*]\s*)?(?:\[[ x]?\]\s*)?(?:none(?:\s+(?:identified|mentioned|discussed|noted))?|n\/a|no\s+(?:specific\s+)?action\s+items?(?:\s+\w+)?)\s*[.!]*$/i;
+
+/**
+ * Number of real action items in a parsed meeting entry. Entries may be strings
+ * or objects; strings the model used as a "nothing here" placeholder are dropped.
+ */
+export function countActionItems(items: unknown): number {
+  if (!Array.isArray(items)) return 0;
+  return items.filter((item) => {
+    if (typeof item === 'string') {
+      const text = item.trim();
+      return text !== '' && !NO_ACTION_ITEMS.test(text);
+    }
+    return typeof item === 'object' && item !== null;
+  }).length;
+}
+
 /**
  * On job completion, decide two INDEPENDENT things: whether to NAVIGATE off the
  * transient /processing screen, and whether to NOTIFY. They're independent

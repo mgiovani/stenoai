@@ -7387,7 +7387,11 @@ function setupDevNotificationTriggers() {
       const withNotes = meetings.filter((m) => m.session_info?.summary_file);
       const m = withNotes[0];
       return m
-        ? { summaryFile: m.session_info.summary_file, title: m.session_info.name || 'Untitled note' }
+        ? {
+          summaryFile: m.session_info.summary_file,
+          title: m.session_info.name || 'Untitled note',
+          actionItemCount: Array.isArray(m.action_items) ? m.action_items.length : 0,
+        }
         : null;
     } catch (e) {
       sendDebugLog(`[dev-notify] list-meetings failed: ${e.message}`);
@@ -7414,7 +7418,11 @@ function setupDevNotificationTriggers() {
   register('Control+Alt+3', 'note-ready', async () => {
     const note = await latestNote();
     if (!note) { sendDebugLog('[dev-notify] no note for note-ready'); return; }
-    void showNoteReadyNotification({ title: note.title, summaryFile: note.summaryFile });
+    void showNoteReadyNotification({
+      title: note.title,
+      summaryFile: note.summaryFile,
+      actionItemCount: note.actionItemCount,
+    });
   });
   sendDebugLog('[dev-notify] triggers registered (Ctrl+Alt+1/2/3)');
 }

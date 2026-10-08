@@ -3,6 +3,7 @@ import {
   classifyCompletionNotification,
   meetingAlreadyHasNotes,
   completionActions,
+  countActionItems,
 } from './completionNotification';
 
 const NOTE = '/meetings/abc_summary.md';
@@ -122,5 +123,33 @@ describe('meetingAlreadyHasNotes (#M2 — real notes_generated semantics)', () =
     expect(classifyCompletionNotification({ notesGenerated: false, notesAlreadyExist })).toBe(
       'transcript-ready',
     );
+  });
+});
+
+describe('countActionItems', () => {
+  it('counts strings and objects', () => {
+    expect(countActionItems(['Alice sends the deck', { owner: 'Bob', task: 'Book room' }])).toBe(2);
+  });
+
+  it('returns 0 for non-arrays', () => {
+    for (const v of [undefined, null, 'a', 3, {}]) expect(countActionItems(v)).toBe(0);
+  });
+
+  it('skips empty and whitespace strings and null entries', () => {
+    expect(countActionItems(['', '   ', null, 'Real item'])).toBe(1);
+  });
+
+  it('drops "nothing" placeholders', () => {
+    const placeholders = [
+      'None', '- None.', 'none.', 'N/A', 'n/a', '[ ] None',
+      'No action items identified.', 'No action items.', 'No action items discussed',
+      'None identified', 'None mentioned.',
+    ];
+    for (const p of placeholders) expect(countActionItems([p])).toBe(0);
+  });
+
+  it('keeps real items that merely start with "None of the"', () => {
+    expect(countActionItems(['None of the vendors replied - Bob to chase'])).toBe(1);
+    expect(countActionItems(['No action items were closed; Sam to audit', 'None'])).toBe(1);
   });
 });

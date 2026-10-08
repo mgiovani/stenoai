@@ -11,6 +11,7 @@ import { streamCache } from '@/lib/meetingDetailState';
 import {
   classifyCompletionNotification,
   meetingAlreadyHasNotes,
+  countActionItems,
   completionActions,
 } from '@/lib/completionNotification';
 import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
@@ -603,6 +604,9 @@ export function useRecordingProcessingEffects() {
                 title,
                 summaryFile: finishedSummaryFile,
                 failed: isFailed,
+                actionItemCount: data.notesGenerated
+                  ? countActionItems(data.meetingData?.action_items)
+                  : undefined,
               })
               .catch(() => {
                 // Notification failure isn't fatal — the note is still

@@ -12,12 +12,17 @@
  *  - hardFailure: processing crashed (or an import never enqueued) so no note was
  *    written — nothing to open; keep the copy neutral.
  *  - failed: a graceful transcription failure DID write a marked note.
- *  - otherwise: the note is genuinely ready — the body IS the note title.
+ *  - otherwise: the note is genuinely ready — the body IS the note title, and the
+ *    title carries an action-item count when the renderer supplies a positive one
+ *    (the body is clipped to one line, so the teaser lives in the title).
  */
 function buildNoteReadyNotificationOptions(payload) {
-  const { title, failed, hardFailure } = payload || {};
+  const { title, failed, hardFailure, actionItemCount } = payload || {};
+  const teaser = Number.isInteger(actionItemCount) && actionItemCount > 0
+    ? ` · ${actionItemCount} action item${actionItemCount === 1 ? '' : 's'}`
+    : '';
   return {
-    title: hardFailure ? 'Processing failed' : failed ? 'Transcription failed' : 'Note ready',
+    title: hardFailure ? 'Processing failed' : failed ? 'Transcription failed' : `Note ready${teaser}`,
     body: hardFailure
       ? `Steno couldn't process ${title ? `"${title}"` : 'your note'}.`
       : failed

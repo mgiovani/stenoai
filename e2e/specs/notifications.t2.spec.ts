@@ -39,6 +39,7 @@ const showNote = (page: import('@playwright/test').Page) =>
     (window as StenoWindow).stenoai.settings.showNoteReadyNotification({
       title: 'E2E note',
       summaryFile: 'e2e-note.json',
+      actionItemCount: 3,
     }),
   );
 const showMicOnly = (page: import('@playwright/test').Page) =>
