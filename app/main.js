@@ -380,7 +380,7 @@ class Notification extends EventEmitter {
       })),
     };
     if (options.iconType) this.payload.iconType = options.iconType;
-    if (options.color) this.payload.color = options.color;
+    if (options.detail) this.payload.detail = options.detail;
   }
 
   show() {
@@ -7390,11 +7390,7 @@ function setupDevNotificationTriggers() {
       const withNotes = meetings.filter((m) => m.session_info?.summary_file);
       const m = withNotes[0];
       return m
-        ? {
-          summaryFile: m.session_info.summary_file,
-          title: m.session_info.name || 'Untitled note',
-          actionItemCount: Array.isArray(m.action_items) ? m.action_items.length : 0,
-        }
+        ? { summaryFile: m.session_info.summary_file, title: m.session_info.name || 'Untitled note' }
         : null;
     } catch (e) {
       sendDebugLog(`[dev-notify] list-meetings failed: ${e.message}`);
@@ -7421,11 +7417,7 @@ function setupDevNotificationTriggers() {
   register('Control+Alt+3', 'note-ready', async () => {
     const note = await latestNote();
     if (!note) { sendDebugLog('[dev-notify] no note for note-ready'); return; }
-    void showNoteReadyNotification({
-      title: note.title,
-      summaryFile: note.summaryFile,
-      actionItemCount: note.actionItemCount,
-    });
+    void showNoteReadyNotification({ title: note.title, summaryFile: note.summaryFile });
   });
   sendDebugLog('[dev-notify] triggers registered (Ctrl+Alt+1/2/3)');
 }
@@ -8635,14 +8627,8 @@ async function showNoteReadyNotification(payload) {
   // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
   if (!(await notificationsEnabled())) return { success: true, shown: false };
   const { summaryFile } = payload || {};
-  const { title, body, iconType, outcome } = buildNoteReadyNotificationOptions(payload);
-  const notif = new Notification({
-    title,
-    body,
-    iconType,
-    // Pin the accent: the toast otherwise hashes the title, which now varies with the action-item count.
-    color: outcome === 'success' ? '#EC4899' : undefined,
-  });
+  const { title, detail, body, iconType, outcome } = buildNoteReadyNotificationOptions(payload);
+  const notif = new Notification({ title, detail, body, iconType });
   notif.on('click', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       exposeMainWindow();

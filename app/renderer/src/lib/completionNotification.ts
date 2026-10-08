@@ -56,8 +56,6 @@ export function meetingAlreadyHasNotes(
   return meetingData.session_info?.notes_generated !== false;
 }
 
-// ponytail: English-only phrasings. The prompt in src/summarizer.py asks for an
-// empty section when there is nothing to do; this only catches stragglers.
 const LEADING_MARKUP = /^(?:(?:[-*\u2022]|\d+\.)\s*)?(?:\[[ xX]?\]\s*)?[*_\s]*/;
 const TRAILING_MARKUP = /[\s.!*_]+$/;
 const NO_ACTION_ITEMS =
@@ -67,7 +65,6 @@ function isPlaceholder(text: string): boolean {
   return NO_ACTION_ITEMS.test(text.replace(LEADING_MARKUP, '').replace(TRAILING_MARKUP, ''));
 }
 
-/** Flatten loosely-typed list entries (strings or {owner, description}-style objects) to display strings. */
 export function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
