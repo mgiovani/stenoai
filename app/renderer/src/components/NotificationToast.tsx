@@ -15,7 +15,6 @@ interface NotificationAction {
 interface NotificationData {
   id?: string;
   title: string;
-  /** Secondary title fragment; kept apart from `title`, which also keys the accent colour. */
   detail?: string;
   body?: string;
   time?: string;
