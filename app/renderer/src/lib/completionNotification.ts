@@ -56,24 +56,41 @@ export function meetingAlreadyHasNotes(
   return meetingData.session_info?.notes_generated !== false;
 }
 
-// ponytail: English-only. Non-English "nothing" bullets still count; the real
-// fix is telling the prompt in src/summarizer.py to leave the section empty.
+// ponytail: English-only phrasings. The prompt in src/summarizer.py asks for an
+// empty section when there is nothing to do; this only catches stragglers.
+const LEADING_MARKUP = /^(?:(?:[-*\u2022]|\d+\.)\s*)?(?:\[[ xX]?\]\s*)?[*_\s]*/;
+const TRAILING_MARKUP = /[\s.!*_]+$/;
 const NO_ACTION_ITEMS =
-  /^(?:[-*]\s*)?(?:\[[ x]?\]\s*)?(?:none(?:\s+(?:identified|mentioned|discussed|noted))?|n\/a|no\s+(?:specific\s+)?action\s+items?(?:\s+\w+)?)\s*[.!]*$/i;
+  /^(?:none(?:\s+(?:identified|mentioned|discussed|noted|at this time))?|n\/a|tbd|nothing to report|(?:there\s+(?:was|were|are)\s+)?no\s+(?:(?:clear|specific|explicit)\s+)?action\s+items?(?:\s+[a-z]+){0,5})$/i;
+
+function isPlaceholder(text: string): boolean {
+  return NO_ACTION_ITEMS.test(text.replace(LEADING_MARKUP, '').replace(TRAILING_MARKUP, ''));
+}
+
+/** Flatten loosely-typed list entries (strings or {owner, description}-style objects) to display strings. */
+export function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((v) => {
+      if (typeof v === 'string') return v;
+      if (typeof v !== 'object' || v === null) return '';
+      const obj = v as Record<string, unknown>;
+      const desc = typeof obj.description === 'string' ? obj.description : '';
+      const owner = typeof obj.owner === 'string' ? obj.owner : '';
+      if (desc) return owner ? `${owner}: ${desc}` : desc;
+      if (typeof obj.text === 'string') return obj.text;
+      if (typeof obj.name === 'string') return obj.name;
+      return '';
+    })
+    .filter(Boolean);
+}
 
 /**
- * Number of real action items in a parsed meeting entry. Entries may be strings
- * or objects; strings the model used as a "nothing here" placeholder are dropped.
+ * Number of real action items in a parsed meeting entry, counted the way the
+ * detail view lists them, minus "nothing here" placeholders the model emitted.
  */
 export function countActionItems(items: unknown): number {
-  if (!Array.isArray(items)) return 0;
-  return items.filter((item) => {
-    if (typeof item === 'string') {
-      const text = item.trim();
-      return text !== '' && !NO_ACTION_ITEMS.test(text);
-    }
-    return typeof item === 'object' && item !== null;
-  }).length;
+  return asStringArray(items).filter((t) => t.trim() !== '' && !isPlaceholder(t)).length;
 }
 
 /**

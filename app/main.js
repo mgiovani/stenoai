@@ -380,6 +380,7 @@ class Notification extends EventEmitter {
       })),
     };
     if (options.iconType) this.payload.iconType = options.iconType;
+    if (options.color) this.payload.color = options.color;
   }
 
   show() {
@@ -5928,6 +5929,7 @@ async function processNextInQueue() {
                 mainWindow.webContents.send('processing-complete', {
                   success: true,
                   sessionName: sessionNameAtClose,
+                  summaryFile: savedSummaryFile || undefined,
                   message: transcriptionFailedMsg
                     ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
@@ -5946,6 +5948,7 @@ async function processNextInQueue() {
                 mainWindow.webContents.send('processing-complete', {
                   success: true,
                   sessionName: sessionNameAtClose,
+                  summaryFile: savedSummaryFile || undefined,
                   message: transcriptionFailedMsg
                     ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
@@ -8633,7 +8636,13 @@ async function showNoteReadyNotification(payload) {
   if (!(await notificationsEnabled())) return { success: true, shown: false };
   const { summaryFile } = payload || {};
   const { title, body, iconType, outcome } = buildNoteReadyNotificationOptions(payload);
-  const notif = new Notification({ title, body, iconType });
+  const notif = new Notification({
+    title,
+    body,
+    iconType,
+    // Pin the accent: the toast otherwise hashes the title, which now varies with the action-item count.
+    color: outcome === 'success' ? '#EC4899' : undefined,
+  });
   notif.on('click', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       exposeMainWindow();

@@ -128,7 +128,7 @@ describe('meetingAlreadyHasNotes (#M2 — real notes_generated semantics)', () =
 
 describe('countActionItems', () => {
   it('counts strings and objects', () => {
-    expect(countActionItems(['Alice sends the deck', { owner: 'Bob', task: 'Book room' }])).toBe(2);
+    expect(countActionItems(['Alice sends the deck', { owner: 'Bob', description: 'Book room' }])).toBe(2);
   });
 
   it('returns 0 for non-arrays', () => {
@@ -141,15 +141,28 @@ describe('countActionItems', () => {
 
   it('drops "nothing" placeholders', () => {
     const placeholders = [
-      'None', '- None.', 'none.', 'N/A', 'n/a', '[ ] None',
+      'None', '- None.', 'none.', 'N/A', 'n/a', '[ ] None', '[x] None', '1. None',
       'No action items identified.', 'No action items.', 'No action items discussed',
-      'None identified', 'None mentioned.',
+      'None identified', 'None identified.', 'None mentioned.', 'None at this time.',
+      'Nothing to report.', 'No action items were identified.',
+      'No action items identified in this meeting.', 'No clear action items.',
+      'No explicit action items were assigned.', 'There were no action items.',
+      'No action items at this time', '**None**', '_None_', '\u2022 None', 'TBD',
     ];
-    for (const p of placeholders) expect(countActionItems([p])).toBe(0);
+    for (const p of placeholders) expect(countActionItems([p]), p).toBe(0);
   });
 
-  it('keeps real items that merely start with "None of the"', () => {
-    expect(countActionItems(['None of the vendors replied - Bob to chase'])).toBe(1);
+  it('keeps real items that merely start like a placeholder', () => {
+    const real = [
+      'None of the vendors replied - Bob to chase',
+      'No action items were closed; Sam to audit',
+      'Alice to send the deck by Friday',
+    ];
+    for (const r of real) expect(countActionItems([r]), r).toBe(1);
     expect(countActionItems(['No action items were closed; Sam to audit', 'None'])).toBe(1);
+  });
+
+  it('counts what the detail view lists: empty objects do not count', () => {
+    expect(countActionItems([{}, { description: '' }, { description: 'Ship it', owner: 'Ann' }])).toBe(1);
   });
 });

@@ -604,7 +604,10 @@ export function useRecordingProcessingEffects() {
                 title,
                 summaryFile: finishedSummaryFile,
                 failed: isFailed,
-                actionItemCount: data.notesGenerated
+                actionItemCount:
+                  data.notesGenerated &&
+                  data.summaryFile &&
+                  data.meetingData?.session_info.summary_file === data.summaryFile
                   ? countActionItems(data.meetingData?.action_items)
                   : undefined,
               })
