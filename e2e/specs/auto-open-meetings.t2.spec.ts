@@ -106,6 +106,7 @@ test('auto-open settings round-trip to config.json', async ({ launchApp, userDat
 
   const bad = await setSettings(page, { mode: 'bogus' });
   expect(bad.success).toBe(false);
+  expect(String(bad.error)).toContain('mode');
 });
 
 test('ask mode prompts and does not open the link', async ({ launchApp }) => {

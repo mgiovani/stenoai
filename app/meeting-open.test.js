@@ -4,6 +4,7 @@ const {
   normalizeAutoOpenSettings,
   decideMeetingOpen,
   planPremeetingTimers,
+  isOverlapping,
 } = require('./meeting-open');
 
 const NOW = Date.parse('2026-01-01T10:00:00Z');
@@ -30,11 +31,15 @@ test('normalizeAutoOpenSettings defaults and clamping', () => {
     normalizeAutoOpenSettings({
       auto_open_meetings: 'auto',
       auto_open_lead_minutes: 5,
-      auto_open_providers: ['meet', 'meet', 'bogus', 'zoom'],
+      auto_open_providers: ['meet', 'zoom'],
       auto_open_accepted_only: false,
     }),
     { mode: 'auto', leadMinutes: 5, providers: ['meet', 'zoom'], acceptedOnly: false },
   );
+  assert.deepEqual(
+    normalizeAutoOpenSettings({ auto_open_providers: ['meet', 'bogus'] }).providers, [], 'unknown entry voids the list');
+  assert.deepEqual(
+    normalizeAutoOpenSettings({ auto_open_providers: ['meet', 'meet'] }).providers, [], 'duplicate voids the list');
   for (const bad of [31, -1, 1.5, true, '2', null]) {
     assert.equal(normalizeAutoOpenSettings({ auto_open_lead_minutes: bad }).leadMinutes, 1);
   }
@@ -112,4 +117,20 @@ test('planPremeetingTimers', () => {
   assert.deepEqual(plan([ev()], settings(), { firedIds: new Set(['e1']) }), []);
   assert.deepEqual(plan([ev({ is_all_day: true }), ev({ id: 'd', response_status: 'declined' })], settings()), []);
   assert.deepEqual(plan([ev()], settings(), { premeetingEnabled: false }).map((p) => p.delayMs), [4 * MIN]);
+});
+
+test('planPremeetingTimers skips auto-open lead for already-opened events', () => {
+  const base = { premeetingEnabled: false, firedIds: new Set(), openedIds: new Set(['e1']) };
+  assert.deepEqual(planPremeetingTimers([ev()], settings(), base, NOW), []);
+  const withHeadsUp = planPremeetingTimers([ev()], settings(), { ...base, premeetingEnabled: true }, NOW);
+  assert.deepEqual(withHeadsUp.map((p) => p.delayMs), [3 * MIN]);
+});
+
+test('isOverlapping uses calendar time, not fire time', () => {
+  const at = NOW - 10 * MIN;
+  const prev = { at, endMs: Date.parse('2026-01-01T10:30:00Z') };
+  assert.equal(isOverlapping(null, ev(), NOW), false);
+  assert.equal(isOverlapping(prev, ev({ start: '2026-01-01T10:30:00Z' }), NOW), false, 'back-to-back');
+  assert.equal(isOverlapping({ at, endMs: Date.parse('2026-01-01T11:00:00Z') }, ev({ start: '2026-01-01T10:30:00Z' }), NOW), true);
+  assert.equal(isOverlapping({ at: NOW - 30 * 1000, endMs: 0 }, ev(), NOW), true, 'opened 30s ago');
 });

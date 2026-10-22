@@ -508,4 +508,40 @@ describe('GeneralTab open-meetings row', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Zoom' }));
     expect(h.setAutoOpen.mutate).toHaveBeenCalledWith({ providers: ['zoom'] });
   });
+
+  test('turning off a provider removes it; Any link clears the list', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    h.autoOpen.data.providers = ['meet', 'zoom'];
+    render(<GeneralTab />);
+    expect(screen.getByRole('switch', { name: 'Any link' }).getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(screen.getByRole('switch', { name: 'Zoom' }));
+    expect(h.setAutoOpen.mutate).toHaveBeenLastCalledWith({ providers: ['meet'] });
+    fireEvent.click(screen.getByRole('switch', { name: 'Any link' }));
+    expect(h.setAutoOpen.mutate).toHaveBeenLastCalledWith({ providers: [] });
+  });
+
+  test('Any link is on when no provider is selected', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    render(<GeneralTab />);
+    expect(screen.getByRole('switch', { name: 'Any link' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  test('custom lead field shows the saved value and reverts on empty blur', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    h.autoOpen.data.leadMinutes = 10;
+    render(<GeneralTab />);
+    const input = screen.getByLabelText('Minutes before the meeting starts') as HTMLInputElement;
+    expect(input.value).toBe('10');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(input.value).toBe('10');
+    expect(h.setAutoOpen.mutate).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '99' } });
+    fireEvent.blur(input);
+    expect(h.setAutoOpen.mutate).toHaveBeenCalledWith({ lead_minutes: 30 });
+  });
 });

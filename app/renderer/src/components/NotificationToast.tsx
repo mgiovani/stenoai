@@ -3,7 +3,7 @@ import { ipc } from '@/lib/ipc';
 import { useTheme } from '@/hooks/useTheme';
 import { t } from '@/i18n';
 import { AppIcon } from '@/components/ui/app-icon';
-import { AlertCircle, CheckCircle2, Mic, Info } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ExternalLink, Mic, Info } from 'lucide-react';
 
 export type NotificationIconType = 'app' | 'alert' | 'success' | 'recording';
 
@@ -98,7 +98,7 @@ export function NotificationToast() {
 
   const handleOpen = (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    ipc().analytics.track('notification_clicked', { type: 'premeeting' });
+    ipc().analytics.track('notification_clicked', { type: 'meeting_open_ask' });
     void ipc().shell.openExternal(data.meeting_url!, data.event_id);
     ipc().notification.close();
   };
@@ -194,7 +194,11 @@ export function NotificationToast() {
                 onClick={data.autoOpen === 'ask' ? handleOpen : handleJoin}
                 className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
               >
-                <ProfessionalCameraIcon className="h-5 w-5" backgroundColor={barColor ?? '#1B1B19'} />
+                {data.autoOpen === 'ask' ? (
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <ProfessionalCameraIcon className="h-5 w-5" backgroundColor={barColor ?? '#1B1B19'} />
+                )}
                 <span>
                   {data.autoOpen === 'ask' ? t('notificationToast.open') : 'Join & take notes'}
                 </span>

@@ -80,7 +80,7 @@ const { describeUpdateError, updateErrorPhase, isMissingUpdateFeedError } = requ
 const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
-const { normalizeAutoOpenSettings, decideMeetingOpen, planPremeetingTimers } = require('./meeting-open');
+const { normalizeAutoOpenSettings, decideMeetingOpen, planPremeetingTimers, isOverlapping, MAX_LEAD_MINUTES } = require('./meeting-open');
 const { isLinuxLoopbackSupported, startLoopbackCapture, createFrameAligner, createSerialQueue } = require('./linux-loopback');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { shareTempDir, sweepShareTemp, SHARE_TEMP_MAX_AGE_MS } = require('./share-temp');
@@ -9576,7 +9576,7 @@ ipcMain.handle('set-auto-open-meetings', async (_event, patch) => {
       args.push('--mode', p.mode);
     }
     if (p.lead_minutes !== undefined) {
-      if (!Number.isInteger(p.lead_minutes)) return { success: false, error: 'invalid lead_minutes' };
+      if (!Number.isInteger(p.lead_minutes) || p.lead_minutes < 0 || p.lead_minutes > MAX_LEAD_MINUTES) return { success: false, error: 'invalid lead_minutes' };
       args.push('--lead-minutes', String(p.lead_minutes));
     }
     if (p.providers !== undefined) {
@@ -9598,7 +9598,7 @@ ipcMain.handle('set-auto-open-meetings', async (_event, patch) => {
     return jsonData;
   } catch (error) {
     sendDebugLog(`Error setting auto-open meetings: ${error.message}`);
-    return { success: false, error: error.message };
+    return parsePythonFailureJson(error);
   }
 });
 
@@ -11212,7 +11212,7 @@ ipcMain.handle('open-external', async (event, url, eventId) => {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { success: false, error: 'unsupported scheme' };
     }
-    await shell.openExternal(url);
+    await shell.openExternal(parsed.href);
     if (typeof eventId === 'string' && eventId) openedMeetingIds.add(eventId);
     return { success: true };
   } catch (error) {
@@ -11713,7 +11713,7 @@ async function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
     maxResults: String(maxResults),
     singleEvents: 'true',
     orderBy: 'startTime',
-    fields: 'items(id,status,summary,description,start,end,attendees,htmlLink,hangoutLink,conferenceData,colorId)'
+    fields: 'items(id,status,summary,description,start,end,attendees,organizer,htmlLink,hangoutLink,conferenceData,colorId)'
   });
 
   const calendars = await fetchGoogleCalendarList(accessToken, signal);
@@ -12362,7 +12362,9 @@ function normalizeCalendarEvent(event) {
         responseStatus = 'unknown';
       }
     } else {
-      responseStatus = 'organizer';
+      // Attendee-less on a calendar the user doesn't own (shared/subscribed) is
+      // someone else's event: not 'organizer', or accepted-only would auto-open it.
+      responseStatus = !event.organizer || event.organizer.self === true ? 'organizer' : 'unknown';
     }
   }
 
@@ -12546,15 +12548,11 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
 // prompts to record): this is calendar-time based and only focuses — never
 // records — so there's no recording conflict. Suppressed for a meeting we're
 // already recording (matched by calendar event id).
-// Fired ids survive until the start is further out than the longest auto-open lead (30 min)
-// so a pre-start fire is not re-armed by the next re-poll.
-const PREMEETING_PRUNE_AHEAD_MS = 31 * 60 * 1000;
 const PREMEETING_RESCHEDULE_MS = 10 * 60 * 1000;   // re-poll the calendar this often
 const premeetingTimers = new Map();                // eventId -> setTimeout handle
-const premeetingFiredIds = new Set();              // ids already fired this app session
+const premeetingFiredIds = new Map();              // eventId -> start (ms) when it fired
 const openedMeetingIds = new Set();                // ids whose link was opened (click or auto)
-let lastMeetingOpen = null;                        // { at, end } of the latest auto/ask decision
-const OPEN_OVERLAP_MS = 60 * 1000;
+let lastMeetingOpen = null;                        // { at, endMs } of the latest successful auto open
 let premeetingRescheduleTimer = null;
 
 // Fetch upcoming events from whichever provider is connected (mirrors
@@ -12664,18 +12662,18 @@ async function firePreMeetingNotification(event, { allowAuto = true } = {}) {
     alreadyOpened: openedMeetingIds.has(event.id),
     micActive: micActiveApps.size > 0,
     recordingOther: Boolean(currentRecordingSessionName && currentRecordingSessionName !== event.title),
-    overlapping: Boolean(lastMeetingOpen && (nowMs < lastMeetingOpen.end || nowMs - lastMeetingOpen.at < OPEN_OVERLAP_MS)),
+    overlapping: isOverlapping(lastMeetingOpen, event, nowMs),
     allowAuto,
   }, nowMs);
   if (action) {
-    premeetingFiredIds.add(event.id);
-    lastMeetingOpen = { at: nowMs, end: isFinite(endMs) ? endMs : nowMs };
+    premeetingFiredIds.set(event.id, new Date(event.start).getTime());
   }
 
   if (action === 'auto') {
     try {
-      await shell.openExternal(event.meeting_url);
+      await shell.openExternal(new URL(event.meeting_url).href);
       openedMeetingIds.add(event.id);
+      lastMeetingOpen = { at: nowMs, endMs: isFinite(endMs) ? endMs : nowMs };
       showMeetingOpenToast(event, 'auto');
       return { shown: true, action: 'auto' };
     } catch (e) {
@@ -12753,7 +12751,7 @@ async function firePreMeetingNotification(event, { allowAuto = true } = {}) {
 
   // Mark fired only after we've actually shown it, so an unshowable notif
   // (no OS support) isn't permanently skipped by the scheduler's dedupe.
-  premeetingFiredIds.add(event.id);
+  premeetingFiredIds.set(event.id, new Date(event.start).getTime());
   return { shown: true, action: 'heads-up' };
 }
 
@@ -12885,21 +12883,22 @@ async function schedulePreMeetingNotificationsImpl() {
     return;
   }
   const nowMs = Date.now();
-  // Forget fired ids that are no longer a just-fired occurrence: pruned if the
-  // event dropped out of the fetch (cancelled / rolled past the window) OR its
-  // start is now in the future again (a recurring meeting reusing the same id —
-  // re-firing in the pre-start gap is already prevented by the delay<=0 guard
-  // below). Keeps the Set bounded across a long-running session.
+  // Forget fired ids once the event left the fetch (cancelled / past the window)
+  // or was rescheduled (start differs from when it fired), so it can fire again.
+  // Keeps both sets bounded across a long-running session.
   const startById = new Map(events.map((e) => [e.id, new Date(e.start).getTime()]));
-  for (const id of premeetingFiredIds) {
+  for (const [id, firedStart] of premeetingFiredIds) {
     const startMs = startById.get(id);
-    if (startMs === undefined || (isFinite(startMs) && startMs > nowMs + PREMEETING_PRUNE_AHEAD_MS)) {
+    if (startMs === undefined || startMs !== firedStart) {
       premeetingFiredIds.delete(id);
       openedMeetingIds.delete(id);
     }
   }
+  for (const id of openedMeetingIds) {
+    if (!startById.has(id)) openedMeetingIds.delete(id);
+  }
   clearPreMeetingTimers();
-  const plan = planPremeetingTimers(events, settings, { premeetingEnabled, firedIds: premeetingFiredIds }, nowMs);
+  const plan = planPremeetingTimers(events, settings, { premeetingEnabled, firedIds: premeetingFiredIds, openedIds: openedMeetingIds }, nowMs);
   for (const { event: e, delayMs } of plan) {
     premeetingTimers.set(e.id, setTimeout(() => { void firePreMeetingNotification(e); }, delayMs));
   }
@@ -12924,7 +12923,7 @@ ipcMain.handle('show-premeeting-notification', async (_event, payload) => {
   try {
     const event = payload && payload.event;
     if (!event || !event.id) return { success: false, error: 'event with id required' };
-    const { shown, action } = await firePreMeetingNotification(event, { allowAuto: IS_E2E });
+    const { shown, action } = await firePreMeetingNotification(event, { allowAuto: ALLOW_E2E_PATH_SEAMS });
     return { success: true, shown, action };
   } catch (e) {
     sendDebugLog(`Failed to show pre-meeting notification: ${e.message}`);

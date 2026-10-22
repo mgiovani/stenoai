@@ -2,18 +2,24 @@ const { calendarMeetingProvider } = require('./analytics-helpers');
 
 const PREMEETING_LEAD_MS = 2 * 60 * 1000;
 const LATE_WINDOW_MS = 5 * 60 * 1000;
+const OVERLAP_MS = 60 * 1000;
+const MAX_LEAD_MINUTES = 30;
 const MODES = ['off', 'ask', 'auto'];
 const PROVIDERS = ['meet', 'zoom', 'teams'];
 
-// Defaults mirror src/config.py (auto_open_*); keep the two in sync.
+// Mirrors Config.get_auto_open_meetings in src/config.py (an invalid providers
+// list falls back to [] as a whole); keep the two in sync. A float like 5.0 is
+// indistinguishable from 5 after JSON.parse, so that one case reads as valid here.
 function normalizeAutoOpenSettings(raw) {
   const cfg = raw && typeof raw === 'object' ? raw : {};
   const lead = cfg.auto_open_lead_minutes;
   return {
     mode: MODES.includes(cfg.auto_open_meetings) ? cfg.auto_open_meetings : 'off',
-    leadMinutes: Number.isInteger(lead) && lead >= 0 && lead <= 30 ? lead : 1,
+    leadMinutes: Number.isInteger(lead) && lead >= 0 && lead <= MAX_LEAD_MINUTES ? lead : 1,
     providers: Array.isArray(cfg.auto_open_providers)
-      ? [...new Set(cfg.auto_open_providers.filter((p) => PROVIDERS.includes(p)))]
+      && cfg.auto_open_providers.every((p) => PROVIDERS.includes(p))
+      && new Set(cfg.auto_open_providers).size === cfg.auto_open_providers.length
+      ? [...cfg.auto_open_providers]
       : [],
     acceptedOnly: cfg.auto_open_accepted_only !== false,
   };
@@ -54,13 +60,20 @@ function decideMeetingOpen(event, settings, ctx, nowMs) {
   return 'auto';
 }
 
-function planPremeetingTimers(events, settings, { premeetingEnabled, firedIds }, nowMs) {
+// lastOpen: { endMs, at } of the previous successful auto open, or null.
+function isOverlapping(lastOpen, event, nowMs) {
+  if (!lastOpen) return false;
+  const startMs = startMsOf(event);
+  return (isFinite(startMs) && lastOpen.endMs > startMs) || nowMs - lastOpen.at < OVERLAP_MS;
+}
+
+function planPremeetingTimers(events, settings, { premeetingEnabled, firedIds, openedIds }, nowMs) {
   const plan = [];
   for (const event of events || []) {
     if (!event || (firedIds && firedIds.has(event.id))) continue;
     const startMs = startMsOf(event);
     if (!isFinite(startMs) || event.response_status === 'declined') continue;
-    const openable = decideMeetingOpen(event, settings, { allowAuto: true }, nowMs) !== null;
+    const openable = decideMeetingOpen(event, settings, { allowAuto: true, alreadyOpened: Boolean(openedIds && openedIds.has(event.id)) }, nowMs) !== null;
     if (!openable && !premeetingEnabled) continue;
     const lead = openable ? settings.leadMinutes * 60 * 1000 : PREMEETING_LEAD_MS;
     const delayMs = startMs - lead - nowMs;
@@ -71,8 +84,8 @@ function planPremeetingTimers(events, settings, { premeetingEnabled, firedIds },
 }
 
 module.exports = {
-  PREMEETING_LEAD_MS,
-  LATE_WINDOW_MS,
+  MAX_LEAD_MINUTES,
+  isOverlapping,
   normalizeAutoOpenSettings,
   decideMeetingOpen,
   planPremeetingTimers,

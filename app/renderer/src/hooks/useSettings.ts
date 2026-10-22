@@ -592,5 +592,6 @@ export function useSetAutoOpenMeetings() {
     onError: (_err, _patch, ctx) => {
       if (ctx?.previous) qc.setQueryData<AutoOpenMeetings>(key, ctx.previous);
     },
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
 }
