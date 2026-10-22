@@ -72,6 +72,7 @@ export function NotificationToast() {
   if (!data) return null;
 
   const isPremeeting = !!data.premeeting;
+  const premeetingType = data.autoOpen === 'ask' ? 'meeting_open_ask' : 'premeeting';
   const hasValidUrl = !!(data.meeting_url && /^https?:\/\//i.test(data.meeting_url));
   const hasActions = !!(data.actions && data.actions.length > 0);
 
@@ -81,7 +82,7 @@ export function NotificationToast() {
     // it). Generic notifications are tracked entirely main-side via
     // trackNotificationLifecycle, so the renderer must NOT double-track them.
     if (isPremeeting) {
-      ipc().analytics.track('notification_dismissed', { type: 'premeeting' });
+      ipc().analytics.track('notification_dismissed', { type: premeetingType });
     }
     ipc().notification.close();
   };
@@ -113,7 +114,7 @@ export function NotificationToast() {
 
   const handleBody = () => {
     if (isPremeeting) {
-      ipc().analytics.track('notification_clicked', { type: 'premeeting' });
+      ipc().analytics.track('notification_clicked', { type: premeetingType });
       ipc().window.focus();
     } else {
       ipc().notification.bodyClicked(data.id);

@@ -11213,7 +11213,7 @@ ipcMain.handle('open-external', async (event, url, eventId) => {
       return { success: false, error: 'unsupported scheme' };
     }
     await shell.openExternal(parsed.href);
-    if (typeof eventId === 'string' && eventId) openedMeetingIds.add(eventId);
+    if (typeof eventId === 'string' && eventId) openedMeetingIds.set(eventId, knownEventStarts.get(eventId) ?? null);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -11729,6 +11729,9 @@ async function fetchCalendarEvents(accessToken, maxResults = 50, signal) {
       items.forEach(item => {
         item.calendarBackgroundColor = cal.backgroundColor;
         item._sourceCalendarId = cal.id;
+        // attendee/organizer `self` is relative to the calendar copy, so only the
+        // account's own primary calendar can vouch for "I accepted/organize this".
+        item._ownCalendar = cal.primary === true;
       });
       return items;
     });
@@ -12123,6 +12126,7 @@ async function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) 
 
   const calendars = await fetchOutlookCalendarList(accessToken, signal);
   if (calendars.length === 0) return [];
+  const accountEmail = String(loadOutlookTokens()?.email || '').toLowerCase();
 
   const results = [];
   const concurrency = 3;
@@ -12148,6 +12152,8 @@ async function fetchOutlookCalendarEvents(accessToken, maxResults = 50, signal) 
       items.forEach(item => {
         item.calendarBackgroundColor = hexColor;
         item.id = `${cal.id}_${item.id}`;
+        item._ownCalendar = cal.isDefaultCalendar === true
+          || Boolean(accountEmail && String(cal.owner?.address || '').toLowerCase() === accountEmail);
       });
       return items;
     });
@@ -12423,6 +12429,7 @@ function normalizeCalendarEvent(event) {
       undefined,
     is_all_day: isAllDay,
     response_status: responseStatus,
+    own_calendar: event._ownCalendar === true,
     color: eventColor,
   };
 }
@@ -12551,7 +12558,8 @@ async function getCalendarEventForNow(timeoutMs = 1500) {
 const PREMEETING_RESCHEDULE_MS = 10 * 60 * 1000;   // re-poll the calendar this often
 const premeetingTimers = new Map();                // eventId -> setTimeout handle
 const premeetingFiredIds = new Map();              // eventId -> start (ms) when it fired
-const openedMeetingIds = new Set();                // ids whose link was opened (click or auto)
+const openedMeetingIds = new Map();                // eventId -> start (ms) of the occurrence whose link was opened (click or auto)
+let knownEventStarts = new Map();                  // eventId -> start (ms) from the last scheduler fetch
 let lastMeetingOpen = null;                        // { at, endMs } of the latest successful auto open
 let premeetingRescheduleTimer = null;
 
@@ -12652,32 +12660,56 @@ function maybeTrackCalendarSnapshot(events, now = new Date()) {
 // owns that, skipping already-fired ids on re-poll) so the seam can drive it
 // repeatedly in tests. `allowAuto` is false for renderer-supplied events so a
 // production renderer can never trigger a no-click open.
-async function firePreMeetingNotification(event, { allowAuto = true } = {}) {
+async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh = false } = {}) {
   premeetingTimers.delete(event.id);
-  // Decide synchronously, before any await, so two fires can't both open a link.
-  const nowMs = Date.now();
-  const settings = loadAutoOpenSettings();
-  const endMs = new Date(event.end).getTime();
-  const action = decideMeetingOpen(event, settings, {
-    alreadyOpened: openedMeetingIds.has(event.id),
-    micActive: micActiveApps.size > 0,
-    recordingOther: Boolean(currentRecordingSessionName && currentRecordingSessionName !== event.title),
-    overlapping: isOverlapping(lastMeetingOpen, event, nowMs),
-    allowAuto,
-  }, nowMs);
+  const decide = (ev) => {
+    const nowMs = Date.now();
+    // Already recording this meeting: never open or ask, whatever the mode.
+    if (currentRecordingSessionName && currentRecordingSessionName === ev.title) return null;
+    return decideMeetingOpen(ev, loadAutoOpenSettings(), {
+      alreadyOpened: openedMeetingIds.has(ev.id),
+      micActive: micActiveApps.size > 0,
+      recordingOther: Boolean(currentRecordingSessionName),
+      overlapping: isOverlapping(lastMeetingOpen, ev, nowMs),
+      allowAuto,
+    }, nowMs);
+  };
+  let action = decide(event);
+
+  // The armed event can be up to PREMEETING_RESCHEDULE_MS stale: before a no-click
+  // open, confirm it still exists (not cancelled/declined) and decide on fresh data.
+  if (action === 'auto' && verifyFresh) {
+    const fresh = await fetchCalendarEventsForScheduler();
+    if (Array.isArray(fresh)) {
+      const current = fresh.find((e) => e.id === event.id);
+      if (!current) return { shown: false, action: null };
+      event = current;
+      action = decide(event);
+    } else {
+      action = 'ask';
+    }
+  }
+  const startMs = new Date(event.start).getTime();
   if (action) {
-    premeetingFiredIds.set(event.id, new Date(event.start).getTime());
+    premeetingFiredIds.set(event.id, startMs);
   }
 
   if (action === 'auto') {
+    // Reserve the slot before the await so a concurrent fire sees this open and
+    // downgrades to ask; restored below if the open fails.
+    const endMs = new Date(event.end).getTime();
+    const reserved = { at: Date.now(), endMs: isFinite(endMs) ? endMs : Date.now() };
+    const prevOpen = lastMeetingOpen;
+    lastMeetingOpen = reserved;
+    openedMeetingIds.set(event.id, startMs);
     try {
       await shell.openExternal(new URL(event.meeting_url).href);
-      openedMeetingIds.add(event.id);
-      lastMeetingOpen = { at: nowMs, endMs: isFinite(endMs) ? endMs : nowMs };
       showMeetingOpenToast(event, 'auto');
       return { shown: true, action: 'auto' };
     } catch (e) {
       sendDebugLog(`[premeeting] auto-open failed, asking instead: ${e.message}`);
+      if (lastMeetingOpen === reserved) lastMeetingOpen = prevOpen;
+      openedMeetingIds.delete(event.id);
       showMeetingOpenToast(event, 'ask');
       return { shown: true, action: 'ask' };
     }
@@ -12758,13 +12790,15 @@ async function firePreMeetingNotification(event, { allowAuto = true } = {}) {
 // Toast for the auto-open flow. 'auto' is informational (explains the window that
 // just appeared, so no Join); 'ask' carries autoOpen so the toast renders "Open".
 function showMeetingOpenToast(event, kind) {
-  const title = event.title || 'meeting';
+  const title = String(event.title || 'meeting').replace(/\p{Cc}+/gu, ' ');
   const notif = new Notification({ title: kind === 'auto' ? `Opening ${title}` : `Open ${title}?` });
   if (kind === 'ask') {
     notif.payload.premeeting = true;
     notif.payload.autoOpen = 'ask';
     notif.payload.meeting_url = event.meeting_url;
     notif.payload.event_id = event.id;
+    // Shown under the title so a misleading title can't hide where the link goes.
+    try { notif.payload.body = new URL(event.meeting_url).hostname; } catch (_) { /* decide already vetted the URL */ }
     notif.payload.time = event.start
       ? new Date(event.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
@@ -12891,16 +12925,19 @@ async function schedulePreMeetingNotificationsImpl() {
     const startMs = startById.get(id);
     if (startMs === undefined || startMs !== firedStart) {
       premeetingFiredIds.delete(id);
-      openedMeetingIds.delete(id);
     }
   }
-  for (const id of openedMeetingIds) {
-    if (!startById.has(id)) openedMeetingIds.delete(id);
+  knownEventStarts = startById;
+  // null = opened before the scheduler knew the event; adopt the current start.
+  for (const [id, openedStart] of openedMeetingIds) {
+    const startMs = startById.get(id);
+    if (startMs === undefined || (openedStart !== null && openedStart !== startMs)) openedMeetingIds.delete(id);
+    else if (openedStart === null) openedMeetingIds.set(id, startMs);
   }
   clearPreMeetingTimers();
   const plan = planPremeetingTimers(events, settings, { premeetingEnabled, firedIds: premeetingFiredIds, openedIds: openedMeetingIds }, nowMs);
   for (const { event: e, delayMs } of plan) {
-    premeetingTimers.set(e.id, setTimeout(() => { void firePreMeetingNotification(e); }, delayMs));
+    premeetingTimers.set(e.id, setTimeout(() => { void firePreMeetingNotification(e, { verifyFresh: true }); }, delayMs));
   }
   sendDebugLog(`[premeeting] armed ${premeetingTimers.size} notification(s)`);
 }

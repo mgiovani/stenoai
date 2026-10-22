@@ -115,6 +115,7 @@ export function GeneralTab() {
   const [customLead, setCustomLead] = React.useState(false);
   const [leadDraft, setLeadDraft] = React.useState(String(autoOpen.data?.leadMinutes ?? 1));
   const leadEditingRef = React.useRef(false);
+  const skipLeadCommitRef = React.useRef(false);
   const leadInputRef = React.useRef<HTMLInputElement>(null);
   const focusLeadOnCloseRef = React.useRef(false);
   const dockIcon = useDockIconSetting();
@@ -171,6 +172,10 @@ export function GeneralTab() {
   }, [leadMinutes]);
   const commitLead = () => {
     leadEditingRef.current = false;
+    if (skipLeadCommitRef.current) {
+      skipLeadCommitRef.current = false;
+      return;
+    }
     const raw = leadDraft.trim();
     const n = Math.round(Number(raw));
     if (raw === '' || !Number.isFinite(n)) {
@@ -418,38 +423,13 @@ export function GeneralTab() {
           </SettingRow>
 
           {openMode !== 'off' && (
-            <div className="pl-4">
+            <div className="border-l" style={{ borderColor: 'var(--border-subtle)' }}>
               <SettingRow
                 label={t('settings.general.openMeetings.when')}
                 description={t('settings.general.openMeetings.whenDescription')}
                 descriptionId="open-meetings-when-description"
               >
                 <div className="flex items-center gap-2">
-                  {leadIsCustom && (
-                    <Input
-                      type="number"
-                      size="sm"
-                      min={0}
-                      max={MAX_LEAD_MINUTES}
-                      ref={leadInputRef}
-                      className={cn(COMPACT_INPUT, 'w-16')}
-                      aria-label={t('settings.general.openMeetings.customAria')}
-                      value={leadDraft}
-                      onFocus={() => {
-                        leadEditingRef.current = true;
-                      }}
-                      onChange={(e) => setLeadDraft(e.target.value)}
-                      onBlur={commitLead}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') e.currentTarget.blur();
-                      }}
-                    />
-                  )}
-                  {leadIsCustom && (
-                    <span className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-                      {t('settings.general.openMeetings.minutesUnit')}
-                    </span>
-                  )}
                   <Select
                     value={leadIsCustom ? 'custom' : String(leadMinutes)}
                     onValueChange={(v) => {
@@ -484,12 +464,44 @@ export function GeneralTab() {
                         <SelectItem key={m} value={String(m)}>
                           {m === 0
                             ? t('settings.general.openMeetings.atStart')
-                            : t('settings.general.openMeetings.minutesBefore', { minutes: m })}
+                            : m === 1
+                              ? t('settings.general.openMeetings.oneMinuteBefore')
+                              : t('settings.general.openMeetings.minutesBefore', { minutes: m })}
                         </SelectItem>
                       ))}
                       <SelectItem value="custom">{t('settings.general.openMeetings.custom')}</SelectItem>
                     </SelectContent>
                   </Select>
+                  {leadIsCustom && (
+                    <Input
+                      type="number"
+                      size="sm"
+                      min={0}
+                      max={MAX_LEAD_MINUTES}
+                      ref={leadInputRef}
+                      className={cn(COMPACT_INPUT, 'w-16')}
+                      aria-label={t('settings.general.openMeetings.customAria')}
+                      value={leadDraft}
+                      onFocus={() => {
+                        leadEditingRef.current = true;
+                      }}
+                      onChange={(e) => setLeadDraft(e.target.value)}
+                      onBlur={commitLead}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                        if (e.key === 'Escape') {
+                          skipLeadCommitRef.current = true;
+                          setLeadDraft(String(leadMinutes));
+                          e.currentTarget.blur();
+                        }
+                      }}
+                    />
+                  )}
+                  {leadIsCustom && (
+                    <span className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
+                      {t('settings.general.openMeetings.minutesUnit')}
+                    </span>
+                  )}
                 </div>
               </SettingRow>
 
@@ -510,21 +522,25 @@ export function GeneralTab() {
                     <Switch
                       checked={selectedProviders.length === 0}
                       onCheckedChange={(v) => {
-                        if (v) setAutoOpen.mutate({ providers: [] });
+                        setAutoOpen.mutate({ providers: v ? [] : [...OPEN_PROVIDERS] });
                       }}
                       disabled={autoOpen.data === undefined}
                     />
                   </label>
-                  {OPEN_PROVIDERS.map((id) => (
-                    <label key={id} className="flex items-center justify-between gap-4 text-[13px]">
-                      {providerLabels[id]}
-                      <Switch
-                        checked={selectedProviders.includes(id)}
-                        onCheckedChange={(v) => toggleProvider(id, v)}
-                        disabled={autoOpen.data === undefined}
-                      />
-                    </label>
-                  ))}
+                  {OPEN_PROVIDERS.map((id) => {
+                    const isLast = selectedProviders.length === 1 && selectedProviders[0] === id;
+                    return (
+                      <label key={id} className="flex items-center justify-between gap-4 text-[13px]">
+                        {providerLabels[id]}
+                        <Switch
+                          checked={selectedProviders.includes(id)}
+                          onCheckedChange={(v) => toggleProvider(id, v)}
+                          disabled={autoOpen.data === undefined || isLast}
+                          title={isLast ? t('settings.general.openMeetings.keepOne') : undefined}
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
               </SettingRow>
 

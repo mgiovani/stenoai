@@ -2051,12 +2051,12 @@ class Config:
         )
 
     @classmethod
-    def _valid_auto_open_providers(cls, value) -> bool:
-        return (
-            isinstance(value, list)
-            and all(isinstance(p, str) and p in cls.AUTO_OPEN_PROVIDERS for p in value)
-            and len(set(value)) == len(value)
-        )
+    def _clean_auto_open_providers(cls, value) -> list:
+        # Keep known entries so a hand-edited list never widens past what the
+        # user chose; mirrors normalizeAutoOpenSettings in app/meeting-open.js.
+        if not isinstance(value, list):
+            return []
+        return list(dict.fromkeys(p for p in value if isinstance(p, str) and p in cls.AUTO_OPEN_PROVIDERS))
 
     def get_auto_open_meetings(self) -> dict:
         """Get the auto-open-meetings settings; each key falls back to its
@@ -2069,7 +2069,7 @@ class Config:
         return {
             "auto_open_meetings": mode if mode in self.AUTO_OPEN_MODES else defaults["auto_open_meetings"],
             "auto_open_lead_minutes": lead if self._valid_auto_open_lead(lead) else defaults["auto_open_lead_minutes"],
-            "auto_open_providers": list(providers) if self._valid_auto_open_providers(providers) else [],
+            "auto_open_providers": self._clean_auto_open_providers(providers),
             "auto_open_accepted_only": accepted if isinstance(accepted, bool) else defaults["auto_open_accepted_only"],
         }
 

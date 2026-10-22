@@ -20,6 +20,7 @@ const ev = (over = {}) => ({
   meeting_url: 'https://meet.google.com/abc-defg-hij',
   response_status: 'accepted',
   is_all_day: false,
+  own_calendar: true,
   ...over,
 });
 const ctx = (over = {}) => ({ allowAuto: true, ...over });
@@ -37,9 +38,10 @@ test('normalizeAutoOpenSettings defaults and clamping', () => {
     { mode: 'auto', leadMinutes: 5, providers: ['meet', 'zoom'], acceptedOnly: false },
   );
   assert.deepEqual(
-    normalizeAutoOpenSettings({ auto_open_providers: ['meet', 'bogus'] }).providers, [], 'unknown entry voids the list');
+    normalizeAutoOpenSettings({ auto_open_providers: ['meet', 'bogus'] }).providers, ['meet'], 'unknown entry dropped');
   assert.deepEqual(
-    normalizeAutoOpenSettings({ auto_open_providers: ['meet', 'meet'] }).providers, [], 'duplicate voids the list');
+    normalizeAutoOpenSettings({ auto_open_providers: ['zoom', 'meet', 'zoom'] }).providers, ['zoom', 'meet'], 'duplicate dropped');
+  assert.deepEqual(normalizeAutoOpenSettings({ auto_open_providers: 'meet' }).providers, []);
   for (const bad of [31, -1, 1.5, true, '2', null]) {
     assert.equal(normalizeAutoOpenSettings({ auto_open_lead_minutes: bad }).leadMinutes, 1);
   }
@@ -89,6 +91,9 @@ test('offset time strings', () => {
 
 test('ask mode always asks; auto downgrades to ask', () => {
   assert.equal(decide(ev(), settings({ mode: 'ask' })), 'ask');
+  assert.equal(decide(ev({ own_calendar: false }), settings()), 'ask', 'shared calendar never auto-opens');
+  assert.equal(decide(ev({ own_calendar: undefined }), settings()), 'ask');
+  assert.equal(decide(ev({ own_calendar: false }), settings({ mode: 'ask' })), 'ask');
   assert.equal(decide(ev(), settings()), 'auto');
   assert.equal(decide(ev({ meeting_url: 'https://example.com/call' }), settings()), 'ask');
   assert.equal(decide(ev(), settings(), ctx({ micActive: true })), 'ask');

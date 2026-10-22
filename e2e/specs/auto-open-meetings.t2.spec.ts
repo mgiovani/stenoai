@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/electron';
-import { readUserConfig } from '../fixtures/user-config';
+import { readUserConfig, enableDeterministicRecording } from '../fixtures/user-config';
 import type { ElectronApplication, Page } from '@playwright/test';
 
 /**
@@ -23,17 +23,19 @@ type CalEvent = {
   end: string;
   meeting_url: string;
   response_status: string;
+  own_calendar?: boolean;
 };
 type StenoWindow = Window & {
   stenoai: {
     settings: {
       getAutoOpenMeetings: () => Promise<Record<string, unknown>>;
       setAutoOpenMeetings: (p: Patch) => Promise<Record<string, unknown>>;
-      setPremeetingNotifications: (v: boolean) => Promise<unknown>;
+      setPremeetingNotifications: (v: boolean) => Promise<Record<string, unknown>>;
       showPremeetingNotification: (p: {
         event: CalEvent;
       }) => Promise<{ success: boolean; shown?: boolean; action?: string | null }>;
     };
+    recording: { start: (name?: string) => Promise<{ success: boolean }> };
   };
 };
 
@@ -47,6 +49,7 @@ function makeEvent(id: string, over: Partial<CalEvent> = {}): CalEvent {
     end: inMin(31),
     meeting_url: `https://meet.google.com/${id}`,
     response_status: 'accepted',
+    own_calendar: true,
     ...over,
   };
 }
@@ -128,11 +131,13 @@ test('auto mode opens an accepted Google Meet link starting in 1 minute', async 
   expect(await opened(app)).toEqual([ev.meeting_url]);
 });
 
-test('auto mode still opens when scheduled-meeting reminders are off', async ({ launchApp }) => {
+test('auto mode still opens when scheduled-meeting reminders are off', async ({ launchApp, userDataDir }) => {
   const { app, page } = await launchApp();
   await spyOpenExternal(app);
   await setSettings(page, { mode: 'auto' });
-  await page.evaluate(() => (window as StenoWindow).stenoai.settings.setPremeetingNotifications(false));
+  const off = await page.evaluate(() => (window as StenoWindow).stenoai.settings.setPremeetingNotifications(false));
+  expect(off.success).toBe(true);
+  expect(readUserConfig(userDataDir).premeeting_notifications_enabled).toBe(false);
   const ev = makeEvent('auto2');
   const r = await fire(page, ev);
   expect(r.action).toBe('auto');
@@ -165,5 +170,38 @@ test('nothing opens when the filters or timing exclude the event', async ({ laun
   const late = makeEvent('late1', { start: inMin(-10), end: inMin(20) });
   expect((await fire(page, late)).action).toBeNull();
 
+  expect(await opened(app)).toEqual([]);
+});
+
+test('a second overlapping meeting asks instead of auto-opening', async ({ launchApp }) => {
+  const { app, page } = await launchApp();
+  await spyOpenExternal(app);
+  await setSettings(page, { mode: 'auto' });
+  const first = makeEvent('ovl1');
+  expect((await fire(page, first)).action).toBe('auto');
+  const second = makeEvent('ovl2', { start: inMin(2), end: inMin(32) });
+  expect((await fire(page, second)).action).toBe('ask');
+  expect(await opened(app)).toEqual([first.meeting_url]);
+});
+
+test('a shared calendar event never auto-opens', async ({ launchApp }) => {
+  const { app, page } = await launchApp();
+  await spyOpenExternal(app);
+  await setSettings(page, { mode: 'auto' });
+  expect((await fire(page, makeEvent('shared1', { own_calendar: false }))).action).toBe('ask');
+  expect(await opened(app)).toEqual([]);
+});
+
+test('the meeting being recorded neither opens nor asks', async ({ launchApp, userDataDir }) => {
+  enableDeterministicRecording(userDataDir);
+  const { app, page } = await launchApp();
+  await spyOpenExternal(app);
+  const ev = makeEvent('rec1', { title: 'Weekly sync' });
+  const started = await page.evaluate((n) => (window as StenoWindow).stenoai.recording.start(n), ev.title);
+  expect(started.success).toBe(true);
+  for (const mode of ['auto', 'ask']) {
+    await setSettings(page, { mode });
+    expect((await fire(page, ev)).action).toBeNull();
+  }
   expect(await opened(app)).toEqual([]);
 });

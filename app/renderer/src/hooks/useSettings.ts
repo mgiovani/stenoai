@@ -592,6 +592,13 @@ export function useSetAutoOpenMeetings() {
     onError: (_err, _patch, ctx) => {
       if (ctx?.previous) qc.setQueryData<AutoOpenMeetings>(key, ctx.previous);
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: (res) => {
+      qc.setQueryData<AutoOpenMeetings>(key, {
+        mode: res.auto_open_meetings,
+        leadMinutes: res.auto_open_lead_minutes,
+        providers: res.auto_open_providers,
+        acceptedOnly: res.auto_open_accepted_only,
+      });
+    },
   });
 }

@@ -7,8 +7,8 @@ const MAX_LEAD_MINUTES = 30;
 const MODES = ['off', 'ask', 'auto'];
 const PROVIDERS = ['meet', 'zoom', 'teams'];
 
-// Mirrors Config.get_auto_open_meetings in src/config.py (an invalid providers
-// list falls back to [] as a whole); keep the two in sync. A float like 5.0 is
+// Mirrors Config.get_auto_open_meetings in src/config.py (unknown/duplicate
+// providers are dropped, a non-list becomes []); keep the two in sync. A float like 5.0 is
 // indistinguishable from 5 after JSON.parse, so that one case reads as valid here.
 function normalizeAutoOpenSettings(raw) {
   const cfg = raw && typeof raw === 'object' ? raw : {};
@@ -17,9 +17,7 @@ function normalizeAutoOpenSettings(raw) {
     mode: MODES.includes(cfg.auto_open_meetings) ? cfg.auto_open_meetings : 'off',
     leadMinutes: Number.isInteger(lead) && lead >= 0 && lead <= MAX_LEAD_MINUTES ? lead : 1,
     providers: Array.isArray(cfg.auto_open_providers)
-      && cfg.auto_open_providers.every((p) => PROVIDERS.includes(p))
-      && new Set(cfg.auto_open_providers).size === cfg.auto_open_providers.length
-      ? [...cfg.auto_open_providers]
+      ? [...new Set(cfg.auto_open_providers.filter((p) => PROVIDERS.includes(p)))]
       : [],
     acceptedOnly: cfg.auto_open_accepted_only !== false,
   };
@@ -55,8 +53,9 @@ function decideMeetingOpen(event, settings, ctx, nowMs) {
   const c = ctx || {};
   if (c.alreadyOpened) return null;
   if (settings.mode === 'ask') return 'ask';
-  // An unknown host never opens without a click: invite links are attacker-controlled.
-  if (provider === 'other' || c.micActive || c.recordingOther || c.overlapping || !c.allowAuto) return 'ask';
+  // An unknown host or a shared/subscribed calendar never opens without a click:
+  // invite links on those are attacker-controlled.
+  if (provider === 'other' || event.own_calendar !== true || c.micActive || c.recordingOther || c.overlapping || !c.allowAuto) return 'ask';
   return 'auto';
 }
 

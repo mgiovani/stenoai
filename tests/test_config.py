@@ -858,7 +858,7 @@ class ConfigAutoOpenMeetingsTests(unittest.TestCase):
         cases = {
             "auto_open_meetings": ["nope", 3, None],
             "auto_open_lead_minutes": [-1, 31, True, 2.5, "3"],
-            "auto_open_providers": ["meet", ["meet", "meet"], ["slack"], [1]],
+            "auto_open_providers": ["meet", "teams", 5, {"a": 1}],
             "auto_open_accepted_only": ["true", 1, None],
         }
         for key, values in cases.items():
@@ -876,6 +876,20 @@ class ConfigAutoOpenMeetingsTests(unittest.TestCase):
                     self.assertEqual(got[key], self.DEFAULTS[key])
                     for other in set(cases) - {key}:
                         self.assertNotEqual(got[other], self.DEFAULTS[other])
+
+    def test_bad_provider_entries_are_dropped_not_widened(self):
+        cases = [
+            (["meet", "bogus"], ["meet"]),
+            (["zoom", "meet", "zoom"], ["zoom", "meet"]),
+            (["slack", 1, ["meet"]], []),
+        ]
+        for stored, expected in cases:
+            with self.subTest(stored=stored), tempfile.TemporaryDirectory() as tmp_dir:
+                path = Path(tmp_dir) / "config.json"
+                path.write_text(json.dumps({"auto_open_providers": stored}))
+                self.assertEqual(
+                    Config(config_path=path).get_auto_open_meetings()["auto_open_providers"], expected
+                )
 
     def test_cli_get_and_set(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

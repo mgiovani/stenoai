@@ -528,6 +528,49 @@ describe('GeneralTab open-meetings row', () => {
     expect(screen.getByRole('switch', { name: 'Any link' }).getAttribute('aria-checked')).toBe('true');
   });
 
+  test('turning Any link off selects all three services', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    render(<GeneralTab />);
+    fireEvent.click(screen.getByRole('switch', { name: 'Any link' }));
+    expect(h.setAutoOpen.mutate).toHaveBeenCalledWith({ providers: ['meet', 'zoom', 'teams'] });
+  });
+
+  test('the last selected service cannot be switched off', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    h.autoOpen.data.providers = ['zoom'];
+    render(<GeneralTab />);
+    const zoom = screen.getByRole('switch', { name: 'Zoom' }) as HTMLButtonElement;
+    expect(zoom.disabled).toBe(true);
+    expect(zoom.getAttribute('title')).toBeTruthy();
+    fireEvent.click(zoom);
+    expect(h.setAutoOpen.mutate).not.toHaveBeenCalled();
+    expect((screen.getByRole('switch', { name: 'Google Meet' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test('accepted-only switch patches accepted_only', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    render(<GeneralTab />);
+    fireEvent.click(screen.getByRole('switch', { name: "Only meetings I've accepted" }));
+    expect(h.setAutoOpen.mutate).toHaveBeenCalledWith({ accepted_only: false });
+  });
+
+  test('Escape in the custom lead field reverts without saving', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    h.autoOpen.data.leadMinutes = 10;
+    render(<GeneralTab />);
+    const input = screen.getByLabelText('Minutes before the meeting starts') as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '20' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+    expect(input.value).toBe('10');
+    expect(h.setAutoOpen.mutate).not.toHaveBeenCalled();
+  });
+
   test('custom lead field shows the saved value and reverts on empty blur', () => {
     h.google.status.data = { connected: true };
     h.autoOpen.data.mode = 'auto';
