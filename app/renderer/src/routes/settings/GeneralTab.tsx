@@ -423,7 +423,7 @@ export function GeneralTab() {
           </SettingRow>
 
           {openMode !== 'off' && (
-            <div className="border-l" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div className="border-l pl-4" style={{ borderColor: 'var(--border-subtle)' }}>
               <SettingRow
                 label={t('settings.general.openMeetings.when')}
                 description={t('settings.general.openMeetings.whenDescription')}

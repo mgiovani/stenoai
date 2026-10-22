@@ -12685,8 +12685,10 @@ async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh
       if (!current) return { shown: false, action: null };
       event = current;
       action = decide(event);
-    } else {
+    } else if (fresh === SCHEDULER_FETCH_FAILED) {
       action = 'ask';
+    } else {
+      return { shown: false, action: null };
     }
   }
   const startMs = new Date(event.start).getTime();

@@ -199,9 +199,13 @@ test('the meeting being recorded neither opens nor asks', async ({ launchApp, us
   const ev = makeEvent('rec1', { title: 'Weekly sync' });
   const started = await page.evaluate((n) => (window as StenoWindow).stenoai.recording.start(n), ev.title);
   expect(started.success).toBe(true);
-  for (const mode of ['auto', 'ask']) {
-    await setSettings(page, { mode });
-    expect((await fire(page, ev)).action).toBeNull();
+  try {
+    for (const mode of ['auto', 'ask']) {
+      await setSettings(page, { mode });
+      expect((await fire(page, ev)).action).toBeNull();
+    }
+    expect(await opened(app)).toEqual([]);
+  } finally {
+    await page.evaluate(() => (window as StenoWindow).stenoai.recording.stop());
   }
-  expect(await opened(app)).toEqual([]);
 });
