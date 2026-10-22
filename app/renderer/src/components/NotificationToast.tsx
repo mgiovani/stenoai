@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ipc } from '@/lib/ipc';
 import { useTheme } from '@/hooks/useTheme';
+import { t } from '@/i18n';
 import { AppIcon } from '@/components/ui/app-icon';
 import { AlertCircle, CheckCircle2, Mic, Info } from 'lucide-react';
 
@@ -24,6 +25,9 @@ interface NotificationData {
    *  analytics; every other notification is a "generic" toast routed through the
    *  action/body-click bridge and tracked entirely main-side. */
   premeeting?: boolean;
+  /** 'ask' = auto-open prompt: the button opens the link only, never starts a recording. */
+  autoOpen?: 'ask';
+  event_id?: string;
   iconType?: NotificationIconType;
   color?: string;
   actions?: NotificationAction[];
@@ -86,9 +90,16 @@ export function NotificationToast() {
     e?.stopPropagation();
     ipc().analytics.track('notification_clicked', { type: 'premeeting' });
     if (hasValidUrl) {
-      ipc().shell.openExternal(data.meeting_url!);
+      ipc().shell.openExternal(data.meeting_url!, data.event_id);
     }
     ipc().recording.start(data.title, 'notification_click');
+    ipc().notification.close();
+  };
+
+  const handleOpen = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    ipc().analytics.track('notification_clicked', { type: 'premeeting' });
+    void ipc().shell.openExternal(data.meeting_url!, data.event_id);
     ipc().notification.close();
   };
 
@@ -180,11 +191,13 @@ export function NotificationToast() {
           ) : isPremeeting ? (
             hasValidUrl ? (
               <button
-                onClick={handleJoin}
+                onClick={data.autoOpen === 'ask' ? handleOpen : handleJoin}
                 className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-900 transition-all hover:bg-gray-50 hover:shadow-sm active:bg-gray-100 active:scale-[0.98] shrink-0 dark:border-white/10 dark:bg-[#2C2C2E] dark:text-gray-100 dark:hover:bg-[#3C3C3E] dark:active:bg-[#1C1C1E]"
               >
                 <ProfessionalCameraIcon className="h-5 w-5" backgroundColor={barColor ?? '#1B1B19'} />
-                <span>Join &amp; take notes</span>
+                <span>
+                  {data.autoOpen === 'ask' ? t('notificationToast.open') : 'Join & take notes'}
+                </span>
               </button>
             ) : null
           ) : (
