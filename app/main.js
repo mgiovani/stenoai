@@ -11213,7 +11213,10 @@ ipcMain.handle('open-external', async (event, url, eventId) => {
       return { success: false, error: 'unsupported scheme' };
     }
     await shell.openExternal(parsed.href);
-    if (typeof eventId === 'string' && eventId) openedMeetingIds.set(eventId, knownEventStarts.get(eventId) ?? null);
+    if (typeof eventId === 'string' && eventId) {
+      openedMeetingIds.set(eventId, knownEventStarts.get(eventId) ?? null);
+      if (!IS_E2E) void schedulePreMeetingNotifications();
+    }
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -12683,6 +12686,10 @@ async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh
     if (Array.isArray(fresh)) {
       const current = fresh.find((e) => e.id === event.id);
       if (!current) return { shown: false, action: null };
+      if (current.start !== event.start) {
+        void schedulePreMeetingNotifications();
+        return { shown: false, action: null };
+      }
       event = current;
       action = decide(event);
     } else if (fresh === SCHEDULER_FETCH_FAILED) {

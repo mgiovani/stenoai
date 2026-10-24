@@ -165,6 +165,9 @@ test('nothing opens when the filters or timing exclude the event', async ({ laun
   // Accepted-only: a needsAction invite is skipped.
   await setSettings(page, { providers: [], accepted_only: true });
   expect((await fire(page, makeEvent('pending1', { response_status: 'needsAction' }))).action).toBeNull();
+  await setSettings(page, { accepted_only: false });
+  expect((await fire(page, makeEvent('pending2', { response_status: 'needsAction' }))).action).toBe('ask');
+  await setSettings(page, { accepted_only: true });
 
   // Started 10 minutes ago: past the late window.
   const late = makeEvent('late1', { start: inMin(-10), end: inMin(20) });

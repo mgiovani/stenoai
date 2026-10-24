@@ -46,16 +46,16 @@ function decideMeetingOpen(event, settings, ctx, nowMs) {
   if (!isFinite(startMs)) return null;
   if (!isSafeMeetingUrl(event.meeting_url)) return null;
   if (event.response_status === 'declined') return null;
-  if (settings.acceptedOnly && event.response_status !== 'accepted' && event.response_status !== 'organizer') return null;
+  const accepted = event.response_status === 'accepted' || event.response_status === 'organizer';
+  if (settings.acceptedOnly && !accepted) return null;
   const provider = calendarMeetingProvider(event.meeting_url);
   if (settings.providers.length > 0 && !settings.providers.includes(provider)) return null;
   if (nowMs - startMs > LATE_WINDOW_MS) return null;
   const c = ctx || {};
   if (c.alreadyOpened) return null;
   if (settings.mode === 'ask') return 'ask';
-  // An unknown host or a shared/subscribed calendar never opens without a click:
-  // invite links on those are attacker-controlled.
-  if (provider === 'other' || event.own_calendar !== true || c.micActive || c.recordingOther || c.overlapping || !c.allowAuto) return 'ask';
+  // Invite links are attacker-controlled, so these never open without a click.
+  if (!accepted || provider === 'other' || event.own_calendar !== true || c.micActive || c.recordingOther || c.overlapping || !c.allowAuto) return 'ask';
   return 'auto';
 }
 

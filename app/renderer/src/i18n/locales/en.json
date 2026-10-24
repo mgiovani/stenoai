@@ -687,5 +687,5 @@
   "settings.general.openMeetings.zoom": "Zoom",
   "settings.general.openMeetings.teams": "Microsoft Teams",
   "settings.general.openMeetings.accepted": "Only meetings I've accepted",
-  "settings.general.openMeetings.acceptedDescription": "Only meetings you accepted or organized. Tentative and unanswered ones are skipped."
+  "settings.general.openMeetings.acceptedDescription": "Only meetings you accepted or organized. With this off, Automatically still asks first for the rest."
 }

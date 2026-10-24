@@ -64,7 +64,7 @@ test('accepted-only response statuses', () => {
   for (const ok of ['accepted', 'organizer']) assert.equal(decide(ev({ response_status: ok }), s), 'auto', ok);
   for (const no of ['tentative', 'needsAction', 'unknown', undefined]) {
     assert.equal(decide(ev({ response_status: no }), s), null, String(no));
-    assert.equal(decide(ev({ response_status: no }), settings({ acceptedOnly: false })), 'auto', String(no));
+    assert.equal(decide(ev({ response_status: no }), settings({ acceptedOnly: false })), 'ask', String(no));
   }
 });
 
