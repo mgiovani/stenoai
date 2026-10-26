@@ -513,7 +513,7 @@ describe('GeneralTab open-meetings row', () => {
     h.google.status.data = { connected: true };
     h.autoOpen.data.mode = 'auto';
     render(<GeneralTab />);
-    expect(screen.getByText(/Automatically opens only while live meeting detection is running/)).toBeTruthy();
+    expect(screen.getByText(/Automatically opens only while Auto-detected meetings is enabled and live meeting detection is running/)).toBeTruthy();
     expect(screen.getByText(/Declined invitations never open/)).toBeTruthy();
   });
 

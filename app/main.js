@@ -11247,6 +11247,10 @@ function decodeJwtPayload(jwt) {
 
 // ── Google Calendar: Token Storage ──────────────────────────────────────
 
+// A refresh may finish after disconnect or a new OAuth connection. Only the
+// token generation that started it may write or clear credentials.
+let googleTokenGeneration = 0;
+
 function getTokenFilePath() {
   // getUserDataDir() like every other app-managed file — the old hardcoded
   // ~/Library/Application Support literal was macOS-only (wrong dir on Windows)
@@ -11263,6 +11267,7 @@ function saveGoogleTokens(tokens) {
     }
     const encrypted = getSafeStorage().encryptString(JSON.stringify(tokens));
     fs.writeFileSync(getTokenFilePath(), encrypted);
+    googleTokenGeneration += 1;
     console.log('Google tokens saved');
   } catch (error) {
     console.error('Failed to save Google tokens:', error.message);
@@ -11284,6 +11289,7 @@ function loadGoogleTokens() {
 }
 
 function deleteGoogleTokens() {
+  googleTokenGeneration += 1;
   try {
     const tokenPath = getTokenFilePath();
     if (fs.existsSync(tokenPath)) {
@@ -11568,6 +11574,7 @@ function exchangeCodeForTokens(code, codeVerifier, port) {
 async function getValidAccessToken() {
   const tokens = loadGoogleTokens();
   if (!tokens) return null;
+  const tokenGeneration = googleTokenGeneration;
 
   // Check if token is expired or about to expire (5-min buffer)
   const bufferMs = 5 * 60 * 1000;
@@ -11586,6 +11593,7 @@ async function getValidAccessToken() {
 
   try {
     const newTokens = await refreshAccessToken(tokens.refresh_token);
+    if (googleTokenGeneration !== tokenGeneration) return null;
     // Preserve the refresh token (Google may not return it again)
     newTokens.refresh_token = newTokens.refresh_token || tokens.refresh_token;
     newTokens.expires_at = Date.now() + (newTokens.expires_in * 1000);
@@ -11597,6 +11605,7 @@ async function getValidAccessToken() {
     saveGoogleTokens(newTokens);
     return newTokens.access_token;
   } catch (error) {
+    if (googleTokenGeneration !== tokenGeneration) return null;
     console.error('Token refresh failed:', error.message);
     if (error.message && (error.message.includes('invalid_grant') || error.message.includes('Token has been expired or revoked'))) {
       deleteGoogleTokens();

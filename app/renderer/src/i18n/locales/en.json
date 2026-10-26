@@ -667,7 +667,7 @@
   "notificationToast.open": "Open",
   "settings.general.openMeetings": "Open meetings",
   "settings.general.openMeetings.description": "Open the meeting link from your calendar when a meeting is about to start.",
-  "settings.general.openMeetings.guardHint": "Automatically opens only while live meeting detection is running. Otherwise Steno asks first.",
+  "settings.general.openMeetings.guardHint": "Automatically opens only while Auto-detected meetings is enabled and live meeting detection is running. Otherwise Steno asks first.",
   "settings.general.openMeetings.off": "Off",
   "settings.general.openMeetings.ask": "Ask",
   "settings.general.openMeetings.auto": "Automatically",

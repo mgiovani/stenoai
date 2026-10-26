@@ -154,7 +154,9 @@ test('Ask and Auto-to-Ask recheck moved, deleted and declined events', async ({ 
   await spyOpenExternal(app);
   for (const mode of ['ask', 'auto']) {
     await setSettings(page, { mode });
-    const old = makeEvent(`${mode}-stale`, mode === 'auto' ? { own_calendar: false } : {});
+    // Auto would open this accepted event from the user's calendar. A failed
+    // freshness fetch must downgrade that path to Ask without opening a link.
+    const old = makeEvent(`${mode}-stale`);
     expect((await fire(page, old, { freshEvents: [] })).action).toBeNull();
     expect((await fire(page, old, { freshEvents: [makeEvent(old.id, { start: inMin(10) })] })).action).toBeNull();
     expect((await fire(page, old, { freshEvents: [{ ...old, response_status: 'declined' }] })).action).toBeNull();

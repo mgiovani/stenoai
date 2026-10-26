@@ -3048,7 +3048,7 @@
         "Auto-detected meetings",
         "Auto-stop on silence",
         "Automatically",
-        "Automatically opens only while live meeting detection is running. Otherwise Steno asks first.",
+        "Automatically opens only while Auto-detected meetings is enabled and live meeting detection is running. Otherwise Steno asks first.",
         "Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.",
         "Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.",
         "Calendar",
