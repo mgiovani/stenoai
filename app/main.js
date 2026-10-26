@@ -11259,7 +11259,7 @@ function getTokenFilePath() {
   return path.join(getUserDataDir(), '.google-tokens');
 }
 
-function saveGoogleTokens(tokens) {
+function saveGoogleTokens(tokens, { refresh = false } = {}) {
   try {
     const tokenDir = path.dirname(getTokenFilePath());
     if (!fs.existsSync(tokenDir)) {
@@ -11267,7 +11267,7 @@ function saveGoogleTokens(tokens) {
     }
     const encrypted = getSafeStorage().encryptString(JSON.stringify(tokens));
     fs.writeFileSync(getTokenFilePath(), encrypted);
-    googleTokenGeneration += 1;
+    if (!refresh) googleTokenGeneration += 1;
     console.log('Google tokens saved');
   } catch (error) {
     console.error('Failed to save Google tokens:', error.message);
@@ -11602,7 +11602,7 @@ async function getValidAccessToken() {
     // refresh grant can't upgrade a pre-existing connection to scopes it
     // wasn't originally consented to.
     newTokens.email = newTokens.email || tokens.email;
-    saveGoogleTokens(newTokens);
+    saveGoogleTokens(newTokens, { refresh: true });
     return newTokens.access_token;
   } catch (error) {
     if (googleTokenGeneration !== tokenGeneration) return null;

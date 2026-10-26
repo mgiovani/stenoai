@@ -68,6 +68,16 @@ test('a normal Google refresh saves the new access token', async (t) => {
   assert.equal(h.loadGoogleTokens().refresh_token, 'old-refresh');
 });
 
+test('concurrent Google refresh callers both receive a token', async (t) => {
+  const h = harness(t);
+  h.seed();
+  const first = h.getValidAccessToken();
+  const second = h.getValidAccessToken();
+  h.refresh.resolve({ access_token: 'new-access', expires_in: 3600 });
+  assert.deepEqual(await Promise.all([first, second]), ['new-access', 'new-access']);
+  assert.equal(h.loadGoogleTokens().access_token, 'new-access');
+});
+
 test('a refresh resolving after disconnect cannot restore Google tokens', async (t) => {
   const h = harness(t);
   h.seed();
