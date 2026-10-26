@@ -66,6 +66,16 @@ function isOverlapping(lastOpen, event, nowMs) {
   return (isFinite(startMs) && lastOpen.endMs > startMs) || nowMs - lastOpen.at < OVERLAP_MS;
 }
 
+function isMicGuardAvailable({ platform, supported, enabled, monitorRunning }) {
+  return platform === 'darwin' && supported === true && enabled === true && monitorRunning === true;
+}
+
+function openReservationEndMs(event, nowMs) {
+  const startMs = startMsOf(event);
+  const endMs = event && typeof event.end === 'string' ? new Date(event.end).getTime() : NaN;
+  return Number.isFinite(endMs) && endMs > startMs ? endMs : nowMs;
+}
+
 function planPremeetingTimers(events, settings, { premeetingEnabled, firedIds, openedIds }, nowMs) {
   const plan = [];
   for (const event of events || []) {
@@ -85,6 +95,8 @@ function planPremeetingTimers(events, settings, { premeetingEnabled, firedIds, o
 module.exports = {
   MAX_LEAD_MINUTES,
   isOverlapping,
+  isMicGuardAvailable,
+  openReservationEndMs,
   normalizeAutoOpenSettings,
   decideMeetingOpen,
   planPremeetingTimers,

@@ -80,7 +80,7 @@ const { describeUpdateError, updateErrorPhase, isMissingUpdateFeedError } = requ
 const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
-const { normalizeAutoOpenSettings, decideMeetingOpen, planPremeetingTimers, isOverlapping, MAX_LEAD_MINUTES } = require('./meeting-open');
+const { normalizeAutoOpenSettings, decideMeetingOpen, planPremeetingTimers, isOverlapping, isMicGuardAvailable, openReservationEndMs, MAX_LEAD_MINUTES } = require('./meeting-open');
 const { isLinuxLoopbackSupported, startLoopbackCapture, createFrameAligner, createSerialQueue } = require('./linux-loopback');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { shareTempDir, sweepShareTemp, SHARE_TEMP_MAX_AGE_MS } = require('./share-temp');
@@ -11212,9 +11212,22 @@ ipcMain.handle('open-external', async (event, url, eventId) => {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { success: false, error: 'unsupported scheme' };
     }
-    await shell.openExternal(parsed.href);
+    const joiningMeeting = typeof eventId === 'string' && eventId;
+    const nowMs = Date.now();
+    const known = joiningMeeting ? knownEventTimes.get(eventId) : null;
+    const previousOpen = lastMeetingOpen;
+    const reserved = joiningMeeting
+      ? { at: nowMs, endMs: known ? openReservationEndMs(known, nowMs) : nowMs }
+      : null;
+    if (reserved) lastMeetingOpen = reserved;
+    try {
+      await shell.openExternal(parsed.href);
+    } catch (error) {
+      if (reserved && lastMeetingOpen === reserved) lastMeetingOpen = previousOpen;
+      throw error;
+    }
     if (typeof eventId === 'string' && eventId) {
-      openedMeetingIds.set(eventId, knownEventStarts.get(eventId) ?? null);
+      openedMeetingIds.set(eventId, known?.startMs ?? null);
       if (!IS_E2E) void schedulePreMeetingNotifications();
     }
     return { success: true };
@@ -12248,7 +12261,9 @@ ipcMain.handle('google-auth-start', async () => {
   try {
     await startGoogleAuth();
     // Only disconnect Outlook after Google auth succeeds
+    invalidatePreMeetingCalendar();
     deleteOutlookTokens();
+    if (!IS_E2E) void schedulePreMeetingNotifications();
     trackEvent('calendar_connected', { provider: 'google' });
     refreshIdentitySuperProperties();
     return { success: true };
@@ -12274,6 +12289,7 @@ ipcMain.handle('google-auth-cancel', async () => {
 
 ipcMain.handle('google-auth-disconnect', async () => {
   try {
+    invalidatePreMeetingCalendar();
     // Best-effort token revocation
     const tokens = loadGoogleTokens();
     if (tokens && tokens.access_token) {
@@ -12295,6 +12311,7 @@ ipcMain.handle('google-auth-disconnect', async () => {
     }
 
     deleteGoogleTokens();
+    if (!IS_E2E) void schedulePreMeetingNotifications();
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('google-auth-changed');
@@ -12562,8 +12579,9 @@ const PREMEETING_RESCHEDULE_MS = 10 * 60 * 1000;   // re-poll the calendar this 
 const premeetingTimers = new Map();                // eventId -> setTimeout handle
 const premeetingFiredIds = new Map();              // eventId -> start (ms) when it fired
 const openedMeetingIds = new Map();                // eventId -> start (ms) of the occurrence whose link was opened (click or auto)
-let knownEventStarts = new Map();                  // eventId -> start (ms) from the last scheduler fetch
-let lastMeetingOpen = null;                        // { at, endMs } of the latest successful auto open
+let knownEventTimes = new Map();                   // eventId -> { startMs, start, end } from the last scheduler fetch
+let lastMeetingOpen = null;                        // { at, endMs } of the latest successful link open
+let calendarConnectionGeneration = 0;             // invalidate in-flight fetches on disconnect
 let premeetingRescheduleTimer = null;
 
 // Fetch upcoming events from whichever provider is connected (mirrors
@@ -12576,26 +12594,38 @@ let premeetingRescheduleTimer = null;
 const SCHEDULER_FETCH_FAILED = Symbol('scheduler-fetch-failed');
 
 async function fetchCalendarEventsForScheduler(timeoutMs = 4000) {
+  const generation = calendarConnectionGeneration;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const googleToken = await getValidAccessToken();
+    if (generation !== calendarConnectionGeneration) return null;
     if (googleToken) {
       const raw = await fetchCalendarEvents(googleToken, 50, controller.signal);
+      if (generation !== calendarConnectionGeneration) return null;
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     const outlookToken = await getValidOutlookAccessToken();
+    if (generation !== calendarConnectionGeneration) return null;
     if (outlookToken) {
       const raw = await fetchOutlookCalendarEvents(outlookToken, 50, controller.signal);
+      if (generation !== calendarConnectionGeneration) return null;
       return raw.map(normalizeCalendarEvent).filter(Boolean);
     }
     return null; // no calendar connected
   } catch (err) {
+    if (generation !== calendarConnectionGeneration) return null;
     sendDebugLog(`[premeeting] calendar fetch failed: ${err.message}`);
     return SCHEDULER_FETCH_FAILED; // transient — caller keeps existing timers
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function invalidatePreMeetingCalendar() {
+  calendarConnectionGeneration += 1;
+  clearPreMeetingTimers();
+  knownEventTimes.clear();
 }
 
 // Content-free periodic snapshot of the connected calendar -- the usage
@@ -12663,7 +12693,7 @@ function maybeTrackCalendarSnapshot(events, now = new Date()) {
 // owns that, skipping already-fired ids on re-poll) so the seam can drive it
 // repeatedly in tests. `allowAuto` is false for renderer-supplied events so a
 // production renderer can never trigger a no-click open.
-async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh = false } = {}) {
+async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh = false, fetchFresh = fetchCalendarEventsForScheduler, testMicGuardAvailable } = {}) {
   premeetingTimers.delete(event.id);
   const decide = (ev) => {
     const nowMs = Date.now();
@@ -12671,7 +12701,17 @@ async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh
     if (currentRecordingSessionName && currentRecordingSessionName === ev.title) return null;
     return decideMeetingOpen(ev, loadAutoOpenSettings(), {
       alreadyOpened: openedMeetingIds.has(ev.id),
-      micActive: micActiveApps.size > 0,
+      micActive: micActiveApps.size > 0 || !(
+        testMicGuardAvailable !== undefined && ALLOW_E2E_PATH_SEAMS
+          ? testMicGuardAvailable === true
+          : isMicGuardAvailable({
+            platform: process.platform,
+            supported: isAutoDetectSupported(),
+            enabled: loadAutoDetectMeetingsEnabled(),
+            monitorRunning: Boolean(micMonitorProc && Number.isInteger(micMonitorProc.pid)
+              && micMonitorProc.exitCode === null && !micMonitorProc.killed),
+          })
+      ),
       recordingOther: Boolean(currentRecordingSessionName),
       overlapping: isOverlapping(lastMeetingOpen, ev, nowMs),
       allowAuto,
@@ -12679,13 +12719,13 @@ async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh
   };
   let action = decide(event);
 
-  // The armed event can be up to PREMEETING_RESCHEDULE_MS stale: before a no-click
-  // open, confirm it still exists (not cancelled/declined) and decide on fresh data.
-  if (action === 'auto' && verifyFresh) {
-    const fresh = await fetchCalendarEventsForScheduler();
+  // The armed event can be up to PREMEETING_RESCHEDULE_MS stale. Both automatic
+  // opens and Ask prompts must use the current calendar state.
+  if ((action === 'auto' || action === 'ask') && verifyFresh) {
+    const fresh = await fetchFresh();
     if (Array.isArray(fresh)) {
       const current = fresh.find((e) => e.id === event.id);
-      if (!current) return { shown: false, action: null };
+      if (!current || current.response_status === 'declined') return { shown: false, action: null };
       if (current.start !== event.start) {
         void schedulePreMeetingNotifications();
         return { shown: false, action: null };
@@ -12693,7 +12733,7 @@ async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh
       event = current;
       action = decide(event);
     } else if (fresh === SCHEDULER_FETCH_FAILED) {
-      action = 'ask';
+      if (action === 'auto') action = 'ask';
     } else {
       return { shown: false, action: null };
     }
@@ -12706,8 +12746,8 @@ async function firePreMeetingNotification(event, { allowAuto = true, verifyFresh
   if (action === 'auto') {
     // Reserve the slot before the await so a concurrent fire sees this open and
     // downgrades to ask; restored below if the open fails.
-    const endMs = new Date(event.end).getTime();
-    const reserved = { at: Date.now(), endMs: isFinite(endMs) ? endMs : Date.now() };
+    const openedAt = Date.now();
+    const reserved = { at: openedAt, endMs: openReservationEndMs(event, openedAt) };
     const prevOpen = lastMeetingOpen;
     lastMeetingOpen = reserved;
     openedMeetingIds.set(event.id, startMs);
@@ -12901,6 +12941,7 @@ function schedulePreMeetingNotifications() {
 }
 
 async function schedulePreMeetingNotificationsImpl() {
+  const generation = calendarConnectionGeneration;
   // Fetched once, shared by the calendar_snapshot metric (below) and the
   // premeeting-arming logic (further down) -- avoids a second calendar API
   // call every 10-min re-poll. The snapshot is intentionally NOT gated on
@@ -12908,12 +12949,14 @@ async function schedulePreMeetingNotificationsImpl() {
   // gating it would bias the "% of meetings recorded" metric toward users
   // who have notifications on.
   const events = await fetchCalendarEventsForScheduler();
+  if (generation !== calendarConnectionGeneration) return;
   if (events && events !== SCHEDULER_FETCH_FAILED) {
     maybeTrackCalendarSnapshot(events);
   }
 
   const settings = loadAutoOpenSettings();
   const premeetingEnabled = await premeetingNotificationsEnabled();
+  if (generation !== calendarConnectionGeneration) return;
   if (!premeetingEnabled && settings.mode === 'off') {
     clearPreMeetingTimers();
     return;
@@ -12936,7 +12979,7 @@ async function schedulePreMeetingNotificationsImpl() {
       premeetingFiredIds.delete(id);
     }
   }
-  knownEventStarts = startById;
+  knownEventTimes = new Map(events.map((e) => [e.id, { startMs: new Date(e.start).getTime(), start: e.start, end: e.end }]));
   // null = opened before the scheduler knew the event; adopt the current start.
   for (const [id, openedStart] of openedMeetingIds) {
     const startMs = startById.get(id);
@@ -12969,7 +13012,27 @@ ipcMain.handle('show-premeeting-notification', async (_event, payload) => {
   try {
     const event = payload && payload.event;
     if (!event || !event.id) return { success: false, error: 'event with id required' };
-    const { shown, action } = await firePreMeetingNotification(event, { allowAuto: ALLOW_E2E_PATH_SEAMS });
+    // Synthetic scheduler inputs are available only in unpackaged E2E runs.
+    // In production the renderer cannot claim a live mic guard or fresh event.
+    const testState = ALLOW_E2E_PATH_SEAMS ? payload.testState : null;
+    if (testState && Array.isArray(testState.knownEvents)) {
+      knownEventTimes = new Map(testState.knownEvents.map((e) =>
+        [e.id, { startMs: new Date(e.start).getTime(), start: e.start, end: e.end }]));
+    }
+    if (testState && Number.isFinite(testState.ageLastOpenMs) && lastMeetingOpen) {
+      lastMeetingOpen.at = Date.now() - testState.ageLastOpenMs;
+    }
+    if (testState && testState.skipFire === true) return { success: true, shown: false, action: null };
+    const options = { allowAuto: ALLOW_E2E_PATH_SEAMS };
+    if (testState) {
+      options.testMicGuardAvailable = testState.micGuardAvailable;
+      if (testState.freshEvents !== undefined) {
+        options.verifyFresh = true;
+        options.fetchFresh = async () => testState.freshEvents === 'failed'
+          ? SCHEDULER_FETCH_FAILED : testState.freshEvents;
+      }
+    }
+    const { shown, action } = await firePreMeetingNotification(event, options);
     return { success: true, shown, action };
   } catch (e) {
     sendDebugLog(`Failed to show pre-meeting notification: ${e.message}`);
@@ -12983,7 +13046,9 @@ ipcMain.handle('outlook-auth-start', async () => {
   try {
     await startOutlookAuth();
     // Only disconnect Google after Outlook auth succeeds
+    invalidatePreMeetingCalendar();
     deleteGoogleTokens();
+    if (!IS_E2E) void schedulePreMeetingNotifications();
     trackEvent('calendar_connected', { provider: 'outlook' });
     refreshIdentitySuperProperties();
     return { success: true };
@@ -13009,7 +13074,9 @@ ipcMain.handle('outlook-auth-cancel', async () => {
 
 ipcMain.handle('outlook-auth-disconnect', async () => {
   try {
+    invalidatePreMeetingCalendar();
     deleteOutlookTokens();
+    if (!IS_E2E) void schedulePreMeetingNotifications();
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('outlook-auth-changed');

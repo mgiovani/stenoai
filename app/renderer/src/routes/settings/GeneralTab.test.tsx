@@ -509,6 +509,14 @@ describe('GeneralTab open-meetings row', () => {
     expect(h.setAutoOpen.mutate).toHaveBeenCalledWith({ providers: ['zoom'] });
   });
 
+  test('Automatically explains the Ask fallback when live mic detection is unavailable', () => {
+    h.google.status.data = { connected: true };
+    h.autoOpen.data.mode = 'auto';
+    render(<GeneralTab />);
+    expect(screen.getByText(/Automatically opens only while live meeting detection is running/)).toBeTruthy();
+    expect(screen.getByText(/Declined invitations never open/)).toBeTruthy();
+  });
+
   test('turning off a provider removes it; Any link clears the list', () => {
     h.google.status.data = { connected: true };
     h.autoOpen.data.mode = 'auto';

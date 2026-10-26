@@ -1437,6 +1437,14 @@ export interface StenoaiBridge {
             meeting_url?: string;
             response_status?: string;
           };
+          /** Unpackaged E2E only; main ignores this in production. */
+          testState?: {
+            micGuardAvailable?: boolean;
+            freshEvents?: unknown[] | null | 'failed';
+            knownEvents?: unknown[];
+            ageLastOpenMs?: number;
+            skipFire?: boolean;
+          };
         },
       ],
       Result<{ shown?: boolean; action?: 'auto' | 'ask' | 'heads-up' | null }>

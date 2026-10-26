@@ -5,6 +5,8 @@ const {
   decideMeetingOpen,
   planPremeetingTimers,
   isOverlapping,
+  isMicGuardAvailable,
+  openReservationEndMs,
 } = require('./meeting-open');
 
 const NOW = Date.parse('2026-01-01T10:00:00Z');
@@ -138,4 +140,26 @@ test('isOverlapping uses calendar time, not fire time', () => {
   assert.equal(isOverlapping(prev, ev({ start: '2026-01-01T10:30:00Z' }), NOW), false, 'back-to-back');
   assert.equal(isOverlapping({ at, endMs: Date.parse('2026-01-01T11:00:00Z') }, ev({ start: '2026-01-01T10:30:00Z' }), NOW), true);
   assert.equal(isOverlapping({ at: NOW - 30 * 1000, endMs: 0 }, ev(), NOW), true, 'opened 30s ago');
+});
+
+test('auto-open requires a running supported mic guard', () => {
+  const ready = { platform: 'darwin', supported: true, enabled: true, monitorRunning: true };
+  assert.equal(isMicGuardAvailable(ready), true);
+  for (const missing of [
+    { ...ready, platform: 'win32' },
+    { ...ready, supported: false },
+    { ...ready, enabled: false },
+    { ...ready, monitorRunning: false },
+  ]) {
+    assert.equal(isMicGuardAvailable(missing), false);
+    assert.equal(decide(ev(), settings(), ctx({ micActive: !isMicGuardAvailable(missing) })), 'ask');
+  }
+});
+
+test('manual open protects through a valid known end, otherwise only the recent-open window', () => {
+  assert.equal(openReservationEndMs(ev(), NOW), Date.parse(ev().end));
+  assert.equal(openReservationEndMs(ev({ end: 'invalid' }), NOW), NOW);
+  assert.equal(openReservationEndMs(ev({ end: iso(4) }), NOW), NOW);
+  const manual = { at: NOW, endMs: openReservationEndMs(ev(), NOW) };
+  assert.equal(isOverlapping(manual, ev({ start: iso(20) }), NOW + 2 * MIN), true);
 });

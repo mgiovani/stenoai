@@ -667,6 +667,7 @@
   "notificationToast.open": "Open",
   "settings.general.openMeetings": "Open meetings",
   "settings.general.openMeetings.description": "Open the meeting link from your calendar when a meeting is about to start.",
+  "settings.general.openMeetings.guardHint": "Automatically opens only while live meeting detection is running. Otherwise Steno asks first.",
   "settings.general.openMeetings.off": "Off",
   "settings.general.openMeetings.ask": "Ask",
   "settings.general.openMeetings.auto": "Automatically",
@@ -687,5 +688,5 @@
   "settings.general.openMeetings.zoom": "Zoom",
   "settings.general.openMeetings.teams": "Microsoft Teams",
   "settings.general.openMeetings.accepted": "Only meetings I've accepted",
-  "settings.general.openMeetings.acceptedDescription": "Only meetings you accepted or organized. With this off, Automatically still asks first for the rest."
+  "settings.general.openMeetings.acceptedDescription": "Only meetings you accepted or organized. With this off, Automatically asks first for tentative, unanswered, or unknown invitations. Declined invitations never open."
 }

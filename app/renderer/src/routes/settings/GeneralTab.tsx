@@ -398,7 +398,9 @@ export function GeneralTab() {
         <>
           <SettingRow
             label={t('settings.general.openMeetings')}
-            description={t('settings.general.openMeetings.description')}
+            description={openMode === 'auto'
+              ? `${t('settings.general.openMeetings.description')} ${t('settings.general.openMeetings.guardHint')}`
+              : t('settings.general.openMeetings.description')}
             descriptionId="open-meetings-description"
             noBorder={openMode === 'off'}
           >

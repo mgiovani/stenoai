@@ -25,14 +25,23 @@ type CalEvent = {
   response_status: string;
   own_calendar?: boolean;
 };
+type TestState = {
+  micGuardAvailable?: boolean;
+  freshEvents?: CalEvent[] | null | 'failed';
+  knownEvents?: CalEvent[];
+  ageLastOpenMs?: number;
+  skipFire?: boolean;
+};
 type StenoWindow = Window & {
   stenoai: {
+    shell: { openExternal: (url: string, eventId?: string) => Promise<{ success: boolean }> };
     settings: {
       getAutoOpenMeetings: () => Promise<Record<string, unknown>>;
       setAutoOpenMeetings: (p: Patch) => Promise<Record<string, unknown>>;
       setPremeetingNotifications: (v: boolean) => Promise<Record<string, unknown>>;
       showPremeetingNotification: (p: {
         event: CalEvent;
+        testState?: TestState;
       }) => Promise<{ success: boolean; shown?: boolean; action?: string | null }>;
     };
     recording: { start: (name?: string) => Promise<{ success: boolean }> };
@@ -57,8 +66,9 @@ function makeEvent(id: string, over: Partial<CalEvent> = {}): CalEvent {
 const setSettings = (page: Page, patch: Patch) =>
   page.evaluate((p) => (window as StenoWindow).stenoai.settings.setAutoOpenMeetings(p), patch);
 
-const fire = (page: Page, event: CalEvent) =>
-  page.evaluate((e) => (window as StenoWindow).stenoai.settings.showPremeetingNotification({ event: e }), event);
+const fire = (page: Page, event: CalEvent, testState: TestState = {}) =>
+  page.evaluate(({ e, state }) => (window as StenoWindow).stenoai.settings.showPremeetingNotification({ event: e, testState: state }),
+    { e: event, state: { micGuardAvailable: true, ...testState } });
 
 async function spyOpenExternal(app: ElectronApplication) {
   await app.evaluate(({ shell }) => {
@@ -129,6 +139,46 @@ test('auto mode opens an accepted Google Meet link starting in 1 minute', async 
   const r = await fire(page, ev);
   expect(r.action).toBe('auto');
   expect(await opened(app)).toEqual([ev.meeting_url]);
+});
+
+test('Automatically asks when the live mic guard is unavailable', async ({ launchApp }) => {
+  const { app, page } = await launchApp();
+  await spyOpenExternal(app);
+  await setSettings(page, { mode: 'auto' });
+  expect((await fire(page, makeEvent('guard-off'), { micGuardAvailable: false })).action).toBe('ask');
+  expect(await opened(app)).toEqual([]);
+});
+
+test('Ask and Auto-to-Ask recheck moved, deleted and declined events', async ({ launchApp }) => {
+  const { app, page } = await launchApp();
+  await spyOpenExternal(app);
+  for (const mode of ['ask', 'auto']) {
+    await setSettings(page, { mode });
+    const old = makeEvent(`${mode}-stale`, mode === 'auto' ? { own_calendar: false } : {});
+    expect((await fire(page, old, { freshEvents: [] })).action).toBeNull();
+    expect((await fire(page, old, { freshEvents: [makeEvent(old.id, { start: inMin(10) })] })).action).toBeNull();
+    expect((await fire(page, old, { freshEvents: [{ ...old, response_status: 'declined' }] })).action).toBeNull();
+    expect((await fire(page, old, { freshEvents: null })).action).toBeNull();
+    expect((await fire(page, old, { freshEvents: 'failed' })).action).toBe('ask');
+  }
+  expect(await opened(app)).toEqual([]);
+});
+
+test('manual Join protects overlapping meetings through the known calendar end', async ({ launchApp }) => {
+  const { app, page } = await launchApp();
+  await spyOpenExternal(app);
+  await setSettings(page, { mode: 'auto' });
+  const first = makeEvent('manual-first', { end: inMin(31) });
+  await fire(page, first, { knownEvents: [first], skipFire: true });
+  const joined = await page.evaluate(({ url, id }) =>
+    (window as StenoWindow).stenoai.shell.openExternal(url, id),
+  { url: first.meeting_url, id: first.id });
+  expect(joined.success).toBe(true);
+  const second = makeEvent('manual-second', { start: inMin(3), end: inMin(33) });
+  // Age the one-minute recent-open guard away: the known event end must still
+  // protect the overlap, rather than this assertion passing for the short guard.
+  expect((await fire(page, second, { ageLastOpenMs: 2 * 60_000 })).action).toBe('ask');
+  expect(await opened(app)).toEqual([first.meeting_url]);
 });
 
 test('auto mode still opens when scheduled-meeting reminders are off', async ({ launchApp, userDataDir }) => {
