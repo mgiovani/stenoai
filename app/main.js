@@ -11217,7 +11217,7 @@ ipcMain.handle('open-external', async (event, url, eventId) => {
     const known = joiningMeeting ? knownEventTimes.get(eventId) : null;
     const previousOpen = lastMeetingOpen;
     const reserved = joiningMeeting
-      ? { at: nowMs, endMs: known ? openReservationEndMs(known, nowMs) : nowMs }
+      ? { at: nowMs, endMs: Math.max(previousOpen?.endMs ?? nowMs, known ? openReservationEndMs(known, nowMs) : nowMs) }
       : null;
     if (reserved) lastMeetingOpen = reserved;
     try {
@@ -12292,6 +12292,9 @@ ipcMain.handle('google-auth-disconnect', async () => {
     invalidatePreMeetingCalendar();
     // Best-effort token revocation
     const tokens = loadGoogleTokens();
+    // Disconnect locally before awaiting the remote revocation. A scheduler
+    // fetch started during that await must not rediscover this connection.
+    deleteGoogleTokens();
     if (tokens && tokens.access_token) {
       try {
         await new Promise((resolve) => {
@@ -12310,7 +12313,6 @@ ipcMain.handle('google-auth-disconnect', async () => {
       }
     }
 
-    deleteGoogleTokens();
     if (!IS_E2E) void schedulePreMeetingNotifications();
 
     if (mainWindow && !mainWindow.isDestroyed()) {
